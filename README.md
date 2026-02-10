@@ -23,7 +23,11 @@ A production-ready tool to download high-quality historical tick and candle data
 ## 🛠️ Installation
 
 1.  **Prerequisites**: Python 3.8 or higher.
-2.  **Clone/Download** the repository.
+2.  **Clone the Repository**:
+    ```bash
+    git clone https://github.com/Praveens1234/dukascopy-downloader.git
+    cd dukascopy-downloader
+    ```
 3.  **Install Dependencies**:
     ```bash
     pip install -r requirements.txt

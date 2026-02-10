@@ -1,0 +1,1523 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dukascopy Data Downloader</title>
+    <meta name="description"
+        content="Download Dukascopy historical forex tick and candle data with a modern web interface">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
+        rel="stylesheet">
+    <style>
+        /* ===== CSS Reset & Variables ===== */
+        *,
+        *::before,
+        *::after {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        :root {
+            --bg-primary: #0a0e17;
+            --bg-secondary: #111827;
+            --bg-card: #1a2234;
+            --bg-card-hover: #1f2a40;
+            --bg-input: #0f1623;
+            --border: #2a3548;
+            --border-focus: #3b82f6;
+            --text-primary: #f1f5f9;
+            --text-secondary: #94a3b8;
+            --text-muted: #64748b;
+            --accent: #3b82f6;
+            --accent-hover: #2563eb;
+            --accent-glow: rgba(59, 130, 246, 0.15);
+            --success: #10b981;
+            --success-bg: rgba(16, 185, 129, 0.1);
+            --warning: #f59e0b;
+            --warning-bg: rgba(245, 158, 11, 0.1);
+            --error: #ef4444;
+            --error-bg: rgba(239, 68, 68, 0.1);
+            --gradient-1: linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%);
+            --gradient-2: linear-gradient(135deg, #0a0e17 0%, #1a2234 100%);
+            --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+            --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.4);
+            --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.5);
+            --shadow-glow: 0 0 20px rgba(59, 130, 246, 0.2);
+            --radius-sm: 8px;
+            --radius-md: 12px;
+            --radius-lg: 16px;
+            --font: 'Inter', -apple-system, sans-serif;
+            --font-mono: 'JetBrains Mono', monospace;
+        }
+
+        html {
+            font-size: 16px;
+            scroll-behavior: smooth;
+        }
+
+        body {
+            font-family: var(--font);
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+            line-height: 1.6;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        /* ===== Layout ===== */
+        .app {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        /* ===== Header ===== */
+        .header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 20px 0 30px;
+            border-bottom: 1px solid var(--border);
+            margin-bottom: 30px;
+        }
+
+        .header-left {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+        }
+
+        .logo {
+            width: 44px;
+            height: 44px;
+            background: var(--gradient-1);
+            border-radius: var(--radius-sm);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+            font-weight: 700;
+            color: white;
+            box-shadow: var(--shadow-glow);
+        }
+
+        .header h1 {
+            font-size: 1.5rem;
+            font-weight: 700;
+            background: var(--gradient-1);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .header-subtitle {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--success);
+            box-shadow: 0 0 8px var(--success);
+            animation: pulse 2s infinite;
+        }
+
+        .header-right {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .status-badge {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 14px;
+            background: var(--success-bg);
+            border: 1px solid rgba(16, 185, 129, 0.2);
+            border-radius: 20px;
+            font-size: 0.75rem;
+            color: var(--success);
+            font-weight: 500;
+        }
+
+        @keyframes pulse {
+
+            0%,
+            100% {
+                opacity: 1;
+            }
+
+            50% {
+                opacity: 0.4;
+            }
+        }
+
+        /* ===== Navigation Tabs ===== */
+        .nav-tabs {
+            display: flex;
+            gap: 4px;
+            background: var(--bg-secondary);
+            padding: 4px;
+            border-radius: var(--radius-md);
+            margin-bottom: 24px;
+            border: 1px solid var(--border);
+        }
+
+        .nav-tab {
+            flex: 1;
+            padding: 10px 16px;
+            background: transparent;
+            border: none;
+            border-radius: var(--radius-sm);
+            color: var(--text-muted);
+            font-family: var(--font);
+            font-size: 0.85rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+        }
+
+        .nav-tab:hover {
+            color: var(--text-secondary);
+            background: var(--bg-card);
+        }
+
+        .nav-tab.active {
+            background: var(--accent);
+            color: white;
+            box-shadow: var(--shadow-glow);
+        }
+
+        .nav-tab .icon {
+            font-size: 1rem;
+        }
+
+        /* ===== Cards ===== */
+        .card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-lg);
+            padding: 24px;
+            margin-bottom: 20px;
+            transition: border-color 0.2s;
+        }
+
+        .card:hover {
+            border-color: rgba(59, 130, 246, 0.3);
+        }
+
+        .card-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 20px;
+        }
+
+        .card-title {
+            font-size: 1rem;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .card-title .icon {
+            font-size: 1.1rem;
+        }
+
+        /* ===== Form Elements ===== */
+        .form-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 16px;
+        }
+
+        .form-group {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .form-group.full-width {
+            grid-column: 1 / -1;
+        }
+
+        .form-label {
+            font-size: 0.8rem;
+            font-weight: 500;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .form-input,
+        .form-select {
+            width: 100%;
+            padding: 10px 14px;
+            background: var(--bg-input);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            color: var(--text-primary);
+            font-family: var(--font);
+            font-size: 0.9rem;
+            transition: all 0.2s;
+            outline: none;
+        }
+
+        .form-input:focus,
+        .form-select:focus {
+            border-color: var(--border-focus);
+            box-shadow: 0 0 0 3px var(--accent-glow);
+        }
+
+        .form-select {
+            cursor: pointer;
+        }
+
+        .form-select option {
+            background: var(--bg-card);
+            color: var(--text-primary);
+        }
+
+        /* Symbol multi-select */
+        .symbol-grid {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            max-height: 120px;
+            overflow-y: auto;
+            padding: 8px;
+            background: var(--bg-input);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+        }
+
+        .symbol-chip {
+            padding: 4px 10px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            font-size: 0.75rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.15s;
+            user-select: none;
+        }
+
+        .symbol-chip:hover {
+            border-color: var(--accent);
+        }
+
+        .symbol-chip.selected {
+            background: var(--accent);
+            border-color: var(--accent);
+            color: white;
+        }
+
+        /* Custom symbol input row */
+        .custom-symbol-row {
+            display: flex;
+            gap: 8px;
+            margin-top: 8px;
+        }
+
+        .custom-symbol-row .form-input {
+            flex: 1;
+        }
+
+        .custom-chips {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin-top: 8px;
+        }
+
+        .custom-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 4px 8px 4px 10px;
+            background: #7c3aed;
+            border: 1px solid #8b5cf6;
+            border-radius: 6px;
+            font-size: 0.75rem;
+            font-weight: 500;
+            color: white;
+        }
+
+        .custom-chip .remove-chip {
+            background: none;
+            border: none;
+            color: rgba(255, 255, 255, 0.7);
+            cursor: pointer;
+            font-size: 0.85rem;
+            padding: 0 2px;
+            line-height: 1;
+        }
+
+        .custom-chip .remove-chip:hover {
+            color: white;
+        }
+
+        /* ===== Buttons ===== */
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            padding: 11px 24px;
+            border: none;
+            border-radius: var(--radius-sm);
+            font-family: var(--font);
+            font-size: 0.9rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            text-decoration: none;
+        }
+
+        .btn-primary {
+            background: var(--gradient-1);
+            color: white;
+            box-shadow: var(--shadow-glow);
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 0 30px rgba(59, 130, 246, 0.3);
+        }
+
+        .btn-primary:active {
+            transform: translateY(0);
+        }
+
+        .btn-primary:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+
+        .btn-secondary {
+            background: var(--bg-secondary);
+            color: var(--text-secondary);
+            border: 1px solid var(--border);
+        }
+
+        .btn-secondary:hover {
+            background: var(--bg-card);
+            color: var(--text-primary);
+        }
+
+        .btn-sm {
+            padding: 6px 14px;
+            font-size: 0.8rem;
+        }
+
+        .btn-icon {
+            width: 36px;
+            height: 36px;
+            padding: 0;
+            border-radius: var(--radius-sm);
+        }
+
+        /* ===== Progress Bar ===== */
+        .progress-section {
+            margin-top: 20px;
+        }
+
+        .progress-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+
+        .progress-label {
+            font-size: 0.85rem;
+            font-weight: 500;
+        }
+
+        .progress-percent {
+            font-size: 0.85rem;
+            color: var(--accent);
+            font-weight: 600;
+            font-family: var(--font-mono);
+        }
+
+        .progress-bar-bg {
+            width: 100%;
+            height: 8px;
+            background: var(--bg-input);
+            border-radius: 4px;
+            overflow: hidden;
+        }
+
+        .progress-bar-fill {
+            height: 100%;
+            background: var(--gradient-1);
+            border-radius: 4px;
+            transition: width 0.4s ease;
+            position: relative;
+        }
+
+        .progress-bar-fill.active::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
+            animation: shimmer 1.5s infinite;
+        }
+
+        @keyframes shimmer {
+            0% {
+                transform: translateX(-100%);
+            }
+
+            100% {
+                transform: translateX(100%);
+            }
+        }
+
+        .progress-stats {
+            display: flex;
+            gap: 20px;
+            margin-top: 10px;
+        }
+
+        .progress-stat {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+        }
+
+        .progress-stat span {
+            color: var(--text-primary);
+            font-weight: 500;
+        }
+
+        /* ===== Terminal / Log Viewer ===== */
+        .terminal {
+            background: #0c0c0c;
+            border: 1px solid var(--border);
+            border-radius: var(--radius-md);
+            overflow: hidden;
+        }
+
+        .terminal-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 10px 16px;
+            background: #1a1a1a;
+            border-bottom: 1px solid #2a2a2a;
+        }
+
+        .terminal-dots {
+            display: flex;
+            gap: 6px;
+        }
+
+        .terminal-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+        }
+
+        .terminal-dot.red {
+            background: #ff5f56;
+        }
+
+        .terminal-dot.yellow {
+            background: #ffbd2e;
+        }
+
+        .terminal-dot.green {
+            background: #27c93f;
+        }
+
+        .terminal-title {
+            font-family: var(--font-mono);
+            font-size: 0.75rem;
+            color: #888;
+        }
+
+        .terminal-body {
+            padding: 14px;
+            height: 300px;
+            overflow-y: auto;
+            font-family: var(--font-mono);
+            font-size: 0.8rem;
+            line-height: 1.7;
+            color: #d4d4d4;
+        }
+
+        .terminal-body::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        .terminal-body::-webkit-scrollbar-thumb {
+            background: #333;
+            border-radius: 3px;
+        }
+
+        .log-line {
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+
+        .log-line.success {
+            color: var(--success);
+        }
+
+        .log-line.error {
+            color: var(--error);
+        }
+
+        .log-line.info {
+            color: var(--accent);
+        }
+
+        /* ===== File Manager ===== */
+        .file-list {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .file-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 14px 16px;
+            background: var(--bg-input);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            transition: all 0.15s;
+        }
+
+        .file-item:hover {
+            border-color: var(--accent);
+            background: var(--bg-card-hover);
+        }
+
+        .file-info {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            flex: 1;
+            min-width: 0;
+        }
+
+        .file-icon {
+            width: 36px;
+            height: 36px;
+            background: var(--accent-glow);
+            border-radius: var(--radius-sm);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1rem;
+            flex-shrink: 0;
+        }
+
+        .file-details {
+            min-width: 0;
+        }
+
+        .file-name {
+            font-size: 0.85rem;
+            font-weight: 500;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .file-meta {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            display: flex;
+            gap: 12px;
+            margin-top: 2px;
+        }
+
+        .file-actions {
+            display: flex;
+            gap: 6px;
+            flex-shrink: 0;
+            margin-left: 12px;
+        }
+
+        /* ===== Jobs Table ===== */
+        .job-item {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            padding: 14px 16px;
+            background: var(--bg-input);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            margin-bottom: 8px;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+
+        .job-item:hover {
+            border-color: var(--accent);
+        }
+
+        .job-status-icon {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.9rem;
+            flex-shrink: 0;
+        }
+
+        .job-status-icon.running {
+            background: var(--accent-glow);
+        }
+
+        .job-status-icon.completed {
+            background: var(--success-bg);
+        }
+
+        .job-status-icon.failed {
+            background: var(--error-bg);
+        }
+
+        .job-details {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .job-title {
+            font-size: 0.85rem;
+            font-weight: 500;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .job-meta {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            margin-top: 2px;
+        }
+
+        .job-progress-mini {
+            width: 80px;
+            height: 4px;
+            background: var(--bg-secondary);
+            border-radius: 2px;
+            overflow: hidden;
+        }
+
+        .job-progress-mini-fill {
+            height: 100%;
+            background: var(--gradient-1);
+            border-radius: 2px;
+            transition: width 0.3s;
+        }
+
+        /* ===== Tab Panels ===== */
+        .tab-panel {
+            display: none;
+        }
+
+        .tab-panel.active {
+            display: block;
+        }
+
+        /* ===== Empty State ===== */
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: var(--text-muted);
+        }
+
+        .empty-state .icon {
+            font-size: 3rem;
+            margin-bottom: 16px;
+            opacity: 0.3;
+        }
+
+        .empty-state p {
+            font-size: 0.9rem;
+        }
+
+        /* ===== Toast ===== */
+        .toast-container {
+            position: fixed;
+            bottom: 24px;
+            right: 24px;
+            z-index: 1000;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .toast {
+            padding: 12px 20px;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            font-size: 0.85rem;
+            box-shadow: var(--shadow-lg);
+            animation: slideIn 0.3s ease;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .toast.success {
+            border-left: 3px solid var(--success);
+        }
+
+        .toast.error {
+            border-left: 3px solid var(--error);
+        }
+
+        @keyframes slideIn {
+            from {
+                transform: translateX(100%);
+                opacity: 0;
+            }
+
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+
+        /* ===== Responsive ===== */
+        @media (max-width: 768px) {
+            .app {
+                padding: 12px;
+            }
+
+            .header {
+                flex-direction: column;
+                gap: 12px;
+                text-align: center;
+            }
+
+            .header-right {
+                justify-content: center;
+            }
+
+            .nav-tabs {
+                overflow-x: auto;
+            }
+
+            .nav-tab {
+                padding: 8px 12px;
+                font-size: 0.8rem;
+                white-space: nowrap;
+            }
+
+            .nav-tab .tab-text {
+                display: none;
+            }
+
+            .form-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .card {
+                padding: 16px;
+            }
+
+            .file-item {
+                flex-wrap: wrap;
+            }
+
+            .file-actions {
+                width: 100%;
+                justify-content: flex-end;
+                margin-top: 8px;
+                margin-left: 0;
+            }
+
+            .progress-stats {
+                flex-wrap: wrap;
+                gap: 10px;
+            }
+
+            .terminal-body {
+                height: 200px;
+                font-size: 0.7rem;
+            }
+
+            /* Responsive Job Item & Header */
+            .card-header {
+                flex-wrap: wrap;
+                gap: 10px;
+            }
+
+            .job-item {
+                flex-wrap: wrap;
+            }
+
+            .job-item>div:last-child {
+                width: 100%;
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                margin-top: 8px;
+                text-align: left !important;
+            }
+
+            .job-progress-mini {
+                width: 100px;
+            }
+        }
+
+        @media (max-width: 480px) {
+            .header h1 {
+                font-size: 1.2rem;
+            }
+
+            .symbol-grid {
+                max-height: 90px;
+            }
+        }
+
+        /* ===== Scrollbar ===== */
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: var(--border);
+            border-radius: 3px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: var(--text-muted);
+        }
+    </style>
+</head>
+
+<body>
+    <div class="app">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-left">
+                <div class="logo">D</div>
+                <div>
+                    <h1>Dukascopy Downloader</h1>
+                    <div class="header-subtitle">Historical Forex & CFD Data</div>
+                </div>
+            </div>
+            <div class="header-right">
+                <div class="status-badge" id="wsStatus">
+                    <div class="status-dot"></div>
+                    <span>Connected</span>
+                </div>
+            </div>
+        </header>
+
+        <!-- Navigation -->
+        <nav class="nav-tabs">
+            <button class="nav-tab active" data-tab="download" onclick="switchTab('download')">
+                <span class="icon">⬇</span>
+                <span class="tab-text">New Download</span>
+            </button>
+            <button class="nav-tab" data-tab="jobs" onclick="switchTab('jobs')">
+                <span class="icon">📋</span>
+                <span class="tab-text">Jobs</span>
+            </button>
+            <button class="nav-tab" data-tab="files" onclick="switchTab('files')">
+                <span class="icon">📁</span>
+                <span class="tab-text">Files</span>
+            </button>
+            <button class="nav-tab" data-tab="terminal" onclick="switchTab('terminal')">
+                <span class="icon">⌨</span>
+                <span class="tab-text">Terminal</span>
+            </button>
+        </nav>
+
+        <!-- ===== TAB: New Download ===== -->
+        <div id="tab-download" class="tab-panel active">
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-title"><span class="icon">📊</span> Download Configuration</div>
+                </div>
+
+                <div class="form-grid">
+                    <!-- Symbols -->
+                    <div class="form-group full-width">
+                        <label class="form-label">Symbols <span id="symbolCount" style="color:var(--accent)">(0
+                                selected)</span></label>
+                        <div class="symbol-grid" id="symbolGrid"></div>
+                        <div class="custom-symbol-row">
+                            <input type="text" class="form-input" id="customSymbolInput"
+                                placeholder="Type custom symbol(s), e.g. BTCUSD, ETHUSD"
+                                onkeydown="if(event.key==='Enter'){event.preventDefault();addCustomSymbols()}">
+                            <button class="btn btn-secondary btn-sm" onclick="addCustomSymbols()"
+                                style="white-space:nowrap;">+ Add</button>
+                        </div>
+                        <div class="custom-chips" id="customChips"></div>
+                    </div>
+
+                    <!-- Date Range -->
+                    <div class="form-group">
+                        <label class="form-label">Start Date</label>
+                        <input type="date" class="form-input" id="startDate" value="2026-01-01">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">End Date</label>
+                        <input type="date" class="form-input" id="endDate" value="2026-02-01">
+                    </div>
+
+                    <!-- Timeframe -->
+                    <div class="form-group">
+                        <label class="form-label">Timeframe</label>
+                        <select class="form-select" id="timeframe">
+                            <option value="TICK">TICK</option>
+                            <option value="M1" selected>M1 (1 Minute)</option>
+                            <option value="M5">M5 (5 Minutes)</option>
+                            <option value="M15">M15 (15 Minutes)</option>
+                            <option value="M30">M30 (30 Minutes)</option>
+                            <option value="H1">H1 (1 Hour)</option>
+                            <option value="H4">H4 (4 Hours)</option>
+                            <option value="D1">D1 (Daily)</option>
+                        </select>
+                    </div>
+
+                    <!-- Threads -->
+                    <div class="form-group">
+                        <label class="form-label">Threads <span id="threadValue"
+                                style="color:var(--accent)">5</span></label>
+                        <input type="range" class="form-input" id="threads" min="1" max="20" value="5"
+                            style="padding:6px 0"
+                            oninput="document.getElementById('threadValue').textContent=this.value">
+                    </div>
+                </div>
+
+                <!-- Submit -->
+                <div style="margin-top: 24px; display: flex; gap: 12px; align-items: center;">
+                    <button class="btn btn-primary" id="btnDownload" onclick="startDownload()">
+                        ⬇ Start Download
+                    </button>
+                    <span id="downloadHint" style="font-size: 0.8rem; color: var(--text-muted);">
+                        Select at least one symbol to start
+                    </span>
+                </div>
+            </div>
+
+            <!-- Active Job Progress -->
+            <div class="card" id="activeJobPanel" style="display:none">
+                <div class="card-header">
+                    <div class="card-title"><span class="icon">⚡</span> <span id="activeJobTitle">Downloading...</span>
+                    </div>
+                    <div style="display:flex; gap:10px; align-items:center;">
+                        <span id="activeJobStatus" class="status-badge"
+                            style="background:var(--accent-glow); border-color:rgba(59,130,246,0.2); color:var(--accent);">Running</span>
+                        <button class="btn btn-secondary btn-sm" id="btnStopActive" onclick="cancelJob(activeJobId)"
+                            style="border-color:var(--error); color:var(--error);">Stop 🛑</button>
+                    </div>
+                </div>
+                <div class="progress-section">
+                    <div class="progress-header">
+                        <span class="progress-label" id="activeJobLabel">Processing...</span>
+                        <span class="progress-percent" id="activeJobPercent">0%</span>
+                    </div>
+                    <div class="progress-bar-bg">
+                        <div class="progress-bar-fill active" id="activeJobBar" style="width:0%"></div>
+                    </div>
+                    <div class="progress-stats">
+                        <div class="progress-stat">Days: <span id="activeJobDays">0/0</span></div>
+                        <div class="progress-stat">Status: <span id="activeJobStatusText">Starting...</span></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ===== TAB: Jobs ===== -->
+        <div id="tab-jobs" class="tab-panel">
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-title"><span class="icon">📋</span> Download History</div>
+                    <button class="btn btn-secondary btn-sm" onclick="loadJobs()">↻ Refresh</button>
+                </div>
+                <div id="jobsList">
+                    <div class="empty-state">
+                        <div class="icon">📋</div>
+                        <p>No download jobs yet</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ===== TAB: Files ===== -->
+        <div id="tab-files" class="tab-panel">
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-title"><span class="icon">📁</span> Exported Data Files</div>
+                    <button class="btn btn-secondary btn-sm" onclick="loadFiles()">↻ Refresh</button>
+                </div>
+                <div id="filesList">
+                    <div class="empty-state">
+                        <div class="icon">📁</div>
+                        <p>No files yet — start a download first</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ===== TAB: Terminal ===== -->
+        <div id="tab-terminal" class="tab-panel">
+            <div class="card" style="padding:0; overflow:hidden;">
+                <div class="terminal">
+                    <div class="terminal-header">
+                        <div class="terminal-dots">
+                            <div class="terminal-dot red"></div>
+                            <div class="terminal-dot yellow"></div>
+                            <div class="terminal-dot green"></div>
+                        </div>
+                        <span class="terminal-title">Live Logs</span>
+                        <button class="btn btn-secondary btn-sm" onclick="clearTerminal()"
+                            style="padding:4px 10px; font-size:0.7rem;">Clear</button>
+                    </div>
+                    <div class="terminal-body" id="terminalBody">
+                        <div class="log-line info">[System] Waiting for download jobs...</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Container -->
+    <div class="toast-container" id="toastContainer"></div>
+
+    <script>
+        // ===== State =====
+        let selectedSymbols = new Set();
+        let activeJobId = null;
+        let ws = null;
+
+        // ===== Init =====
+        document.addEventListener('DOMContentLoaded', () => {
+            loadConfig();
+            connectWebSocket();
+            loadJobs();
+            loadFiles();
+        });
+
+        // ===== Config =====
+        async function loadConfig() {
+            try {
+                const res = await fetch('/api/config');
+                const config = await res.json();
+                renderSymbols(config.symbols);
+            } catch (e) {
+                console.error('Failed to load config:', e);
+            }
+        }
+
+        function renderSymbols(symbols) {
+            const grid = document.getElementById('symbolGrid');
+            grid.innerHTML = symbols.map(s =>
+                `<div class="symbol-chip" data-symbol="${s}" onclick="toggleSymbol('${s}', this)">${s}</div>`
+            ).join('');
+        }
+
+        function toggleSymbol(symbol, el) {
+            if (selectedSymbols.has(symbol)) {
+                selectedSymbols.delete(symbol);
+                el.classList.remove('selected');
+            } else {
+                selectedSymbols.add(symbol);
+                el.classList.add('selected');
+            }
+            updateSymbolCount();
+        }
+
+        function updateSymbolCount() {
+            document.getElementById('symbolCount').textContent = `(${selectedSymbols.size} selected)`;
+        }
+
+        // ===== Custom Symbols =====
+        let customSymbolsList = [];
+
+        function addCustomSymbols() {
+            const input = document.getElementById('customSymbolInput');
+            const raw = input.value.trim().toUpperCase();
+            if (!raw) return;
+
+            // Split by comma, space, or semicolon
+            const symbols = raw.split(/[,;\s]+/).filter(s => s.length >= 3 && /^[A-Z0-9.]+$/.test(s));
+
+            if (symbols.length === 0) {
+                showToast('Enter valid symbol(s) like BTCUSD, ETHUSD', 'error');
+                return;
+            }
+
+            symbols.forEach(sym => {
+                if (!selectedSymbols.has(sym) && !customSymbolsList.includes(sym)) {
+                    customSymbolsList.push(sym);
+                    selectedSymbols.add(sym);
+                }
+            });
+
+            input.value = '';
+            renderCustomChips();
+            updateSymbolCount();
+        }
+
+        function removeCustomSymbol(sym) {
+            customSymbolsList = customSymbolsList.filter(s => s !== sym);
+            selectedSymbols.delete(sym);
+            renderCustomChips();
+            updateSymbolCount();
+        }
+
+        function renderCustomChips() {
+            const container = document.getElementById('customChips');
+            container.innerHTML = customSymbolsList.map(sym =>
+                `<div class="custom-chip">
+            ${sym}
+            <button class="remove-chip" onclick="removeCustomSymbol('${sym}')">✗</button>
+        </div>`
+            ).join('');
+        }
+
+        // ===== Tab Switching =====
+        function switchTab(tab) {
+            document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+            document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
+            document.getElementById(`tab-${tab}`).classList.add('active');
+            document.querySelector(`[data-tab="${tab}"]`).classList.add('active');
+
+            if (tab === 'files') loadFiles();
+            if (tab === 'jobs') loadJobs();
+        }
+
+        // ===== Start Download =====
+        async function startDownload() {
+            if (selectedSymbols.size === 0) {
+                showToast('Select at least one symbol', 'error');
+                return;
+            }
+
+            const startDate = document.getElementById('startDate').value;
+            const endDate = document.getElementById('endDate').value;
+            const timeframe = document.getElementById('timeframe').value;
+            const threads = parseInt(document.getElementById('threads').value);
+
+            if (!startDate || !endDate) {
+                showToast('Please select start and end dates', 'error');
+                return;
+            }
+
+            const btn = document.getElementById('btnDownload');
+            btn.disabled = true;
+            btn.innerHTML = '⏳ Starting...';
+
+            try {
+                const res = await fetch('/api/download', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        symbols: Array.from(selectedSymbols),
+                        start_date: startDate,
+                        end_date: endDate,
+                        timeframe: timeframe,
+                        threads: threads,
+                    }),
+                });
+                const data = await res.json();
+                activeJobId = data.job_id;
+
+                // Show progress panel
+                document.getElementById('activeJobPanel').style.display = 'block';
+                document.getElementById('activeJobTitle').textContent =
+                    `${Array.from(selectedSymbols).join(', ')} — ${timeframe}`;
+                document.getElementById('activeJobPercent').textContent = '0%';
+                document.getElementById('activeJobBar').style.width = '0%';
+                document.getElementById('activeJobBar').classList.add('active');
+
+                // Request logs for this job
+                if (ws && ws.readyState === WebSocket.OPEN) {
+                    ws.send(JSON.stringify({ type: 'get_logs', job_id: activeJobId }));
+                }
+
+                showToast('Download started!', 'success');
+                switchTab('download');
+            } catch (e) {
+                showToast('Failed to start download: ' + e.message, 'error');
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '⬇ Start Download';
+            }
+        }
+
+        // ===== WebSocket =====
+        function connectWebSocket() {
+            const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+            ws = new WebSocket(`${protocol}//${location.host}/ws`);
+
+            ws.onopen = () => {
+                document.getElementById('wsStatus').querySelector('span').textContent = 'Connected';
+                document.getElementById('wsStatus').querySelector('.status-dot').style.background = 'var(--success)';
+            };
+
+            ws.onclose = () => {
+                document.getElementById('wsStatus').querySelector('span').textContent = 'Disconnected';
+                document.getElementById('wsStatus').querySelector('.status-dot').style.background = 'var(--error)';
+                // Reconnect after 2s
+                setTimeout(connectWebSocket, 2000);
+            };
+
+            ws.onmessage = (event) => {
+                const msg = JSON.parse(event.data);
+
+                if (msg.type === 'log') {
+                    appendLog(msg.message);
+                } else if (msg.type === 'full_logs') {
+                    const body = document.getElementById('terminalBody');
+                    body.innerHTML = '';
+                    msg.logs.forEach(line => appendLog(line));
+                } else if (msg.type === 'progress') {
+                    updateProgress(msg);
+                }
+            };
+        }
+
+        function appendLog(message) {
+            const body = document.getElementById('terminalBody');
+            const line = document.createElement('div');
+            line.className = 'log-line';
+            if (message.includes('✓')) line.className += ' success';
+            else if (message.includes('✗') || message.includes('ERROR') || message.includes('FATAL')) line.className += ' error';
+            else if (message.includes('───') || message.includes('═══') || message.includes('Starting')) line.className += ' info';
+            line.textContent = message;
+            body.appendChild(line);
+            body.scrollTop = body.scrollHeight;
+        }
+
+        function clearTerminal() {
+            document.getElementById('terminalBody').innerHTML =
+                '<div class="log-line info">[System] Terminal cleared</div>';
+        }
+
+        // ===== Progress Updates =====
+        function updateProgress(msg) {
+            if (msg.job_id !== activeJobId) return;
+
+            const pct = Math.round(msg.progress);
+            document.getElementById('activeJobPercent').textContent = `${pct}%`;
+            document.getElementById('activeJobBar').style.width = `${pct}%`;
+            document.getElementById('activeJobDays').textContent =
+                `${msg.completed_days}/${msg.total_days}`;
+
+            if (msg.status === 'completed') {
+                document.getElementById('activeJobBar').classList.remove('active');
+                document.getElementById('activeJobStatusText').textContent = 'Completed ✓';
+                document.getElementById('activeJobStatus').style.background = 'var(--success-bg)';
+                document.getElementById('activeJobStatus').style.borderColor = 'rgba(16,185,129,0.2)';
+                document.getElementById('activeJobStatus').style.color = 'var(--success)';
+                document.getElementById('activeJobStatus').textContent = 'Completed';
+                document.getElementById('btnStopActive').style.display = 'none';
+                showToast('Download completed successfully!', 'success');
+                loadFiles();
+                loadJobs();
+            } else if (msg.status === 'failed') {
+                document.getElementById('activeJobBar').classList.remove('active');
+                document.getElementById('activeJobStatusText').textContent = 'Failed ✗';
+                document.getElementById('activeJobStatus').style.background = 'var(--error-bg)';
+                document.getElementById('activeJobStatus').style.color = 'var(--error)';
+                document.getElementById('activeJobStatus').textContent = 'Failed';
+                document.getElementById('btnStopActive').style.display = 'none';
+                showToast('Download failed!', 'error');
+            } else if (msg.status === 'cancelled') {
+                document.getElementById('activeJobBar').classList.remove('active');
+                document.getElementById('activeJobStatusText').textContent = 'Cancelled 🛑';
+                document.getElementById('activeJobStatus').style.background = 'var(--warning-bg)';
+                document.getElementById('activeJobStatus').style.color = 'var(--warning)';
+                document.getElementById('activeJobStatus').textContent = 'Cancelled';
+                document.getElementById('btnStopActive').style.display = 'none';
+                showToast('Download cancelled!', 'warning');
+                loadJobs();
+            } else {
+                document.getElementById('activeJobStatusText').textContent = msg.status === 'cancelling' ? 'Stopping...' : 'Downloading...';
+                document.getElementById('btnStopActive').style.display = 'inline-block';
+                if (msg.status === 'cancelling') {
+                    const btn = document.getElementById('btnStopActive');
+                    if (btn) {
+                        btn.disabled = true;
+                        btn.textContent = 'Stopping...';
+                    }
+                }
+            }
+        }
+
+        // ===== Jobs =====
+        async function loadJobs() {
+            try {
+                const res = await fetch('/api/jobs');
+                const jobs = await res.json();
+                renderJobs(jobs);
+            } catch (e) { }
+        }
+
+        function renderJobs(jobs) {
+            const el = document.getElementById('jobsList');
+            if (!jobs.length) {
+                el.innerHTML = '<div class="empty-state"><div class="icon">📋</div><p>No download jobs yet</p></div>';
+                return;
+            }
+            el.innerHTML = jobs.map(j => {
+                const statusClass = j.status;
+                const statusIcon = j.status === 'completed' ? '✓' : j.status === 'failed' ? '✗' : j.status === 'cancelled' ? '🛑' : '◉';
+                const symbols = j.params?.symbols?.join(', ') || '—';
+                const tf = j.params?.timeframe || '—';
+                const isRunning = ['pending', 'running'].includes(j.status);
+
+                return `
+        <div class="job-item" onclick="viewJobLogs('${j.id}')">
+            <div class="job-status-icon ${statusClass}">${statusIcon}</div>
+            <div class="job-details">
+                <div class="job-title">${symbols} — ${tf}</div>
+                <div class="job-meta">${j.params?.start_date || ''} → ${j.params?.end_date || ''} · ${j.started_at?.substring(11, 19) || ''}</div>
+            </div>
+            <div style="text-align:right">
+                <div style="font-size:0.8rem; font-weight:600; color:var(--accent); font-family:var(--font-mono);">${Math.round(j.progress)}%</div>
+                <div class="job-progress-mini">
+                    <div class="job-progress-mini-fill" style="width:${j.progress}%"></div>
+                </div>
+                ${isRunning ? `<button class="btn btn-secondary btn-sm" onclick="event.stopPropagation();cancelJob('${j.id}')" style="margin-top:6px; padding:2px 8px; font-size:0.7rem; color:var(--error); border-color:var(--error);">Stop</button>` : ''}
+            </div>
+        </div>`;
+            }).join('');
+        }
+
+        async function cancelJob(jobId) {
+            if (!confirm('Are you sure you want to stop this download?')) return;
+            try {
+                const res = await fetch(`/api/jobs/${jobId}/cancel`, { method: 'POST' });
+                const data = await res.json();
+                if (data.status === 'cancelling') {
+                    showToast('Stopping download...', 'warning');
+                    // Optimistic update
+                    const btn = document.getElementById('btnStopActive');
+                    if (btn && activeJobId === jobId) {
+                        btn.textContent = 'Stopping...';
+                        btn.disabled = true;
+                    }
+                } else {
+                    showToast('Failed to cancel or already finished', 'error');
+                }
+            } catch (e) {
+                showToast('Error cancelling job', 'error');
+            }
+        }
+
+        function viewJobLogs(jobId) {
+            activeJobId = jobId;
+            switchTab('terminal');
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: 'get_logs', job_id: jobId }));
+            }
+        }
+
+        // ===== Files =====
+        async function loadFiles() {
+            try {
+                const res = await fetch('/api/files');
+                const files = await res.json();
+                renderFiles(files);
+            } catch (e) { }
+        }
+
+        function renderFiles(files) {
+            const el = document.getElementById('filesList');
+            if (!files.length) {
+                el.innerHTML = '<div class="empty-state"><div class="icon">📁</div><p>No files yet — start a download first</p></div>';
+                return;
+            }
+            el.innerHTML = '<div class="file-list">' + files.map(f => `
+        <div class="file-item">
+            <div class="file-info">
+                <div class="file-icon">📄</div>
+                <div class="file-details">
+                    <div class="file-name">${f.name}</div>
+                    <div class="file-meta">
+                        <span>${f.size_human}</span>
+                        <span>${new Date(f.modified).toLocaleDateString()}</span>
+                    </div>
+                </div>
+            </div>
+            <div class="file-actions">
+                <a href="/api/files/${f.name}" download class="btn btn-primary btn-sm">⬇ Download</a>
+                <button class="btn btn-secondary btn-sm" onclick="deleteFile('${f.name}')">🗑</button>
+            </div>
+        </div>
+    `).join('') + '</div>';
+        }
+
+        async function deleteFile(name) {
+            if (!confirm(`Delete ${name}?`)) return;
+            try {
+                await fetch(`/api/files/${name}`, { method: 'DELETE' });
+                showToast('File deleted', 'success');
+                loadFiles();
+            } catch (e) {
+                showToast('Failed to delete', 'error');
+            }
+        }
+
+        // ===== Toast =====
+        function showToast(message, type = 'success') {
+            const container = document.getElementById('toastContainer');
+            const toast = document.createElement('div');
+            toast.className = `toast ${type}`;
+            toast.innerHTML = `${type === 'success' ? '✓' : '✗'} ${message}`;
+            container.appendChild(toast);
+            setTimeout(() => toast.remove(), 4000);
+        }
+
+        // ===== Polling for active job =====
+        setInterval(async () => {
+            if (activeJobId) {
+                try {
+                    const res = await fetch(`/api/jobs/${activeJobId}`);
+                    const job = await res.json();
+                    if (job.status === 'completed' || job.status === 'failed') {
+                        updateProgress({
+                            job_id: activeJobId,
+                            status: job.status,
+                            progress: job.progress,
+                            completed_days: job.completed_days,
+                            total_days: job.total_days,
+                        });
+                    }
+                } catch (e) { }
+            }
+        }, 3000);
+    </script>
+</body>
+
+</html>

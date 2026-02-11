@@ -12,7 +12,10 @@ import click
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from config.settings import TIMEFRAME_CHOICES, DEFAULT_THREADS, MAX_THREADS, DATA_SOURCE_CHOICES, PRICE_TYPE_CHOICES
+from config.settings import (
+    TIMEFRAME_CHOICES, DEFAULT_THREADS, MAX_THREADS,
+    DATA_SOURCE_CHOICES, PRICE_TYPE_CHOICES, VOLUME_TYPE_CHOICES,
+)
 from app import run_download
 
 
@@ -42,7 +45,13 @@ def validate_date(ctx, param, value):
     '-t', '--timeframe',
     default='TICK',
     type=click.Choice(TIMEFRAME_CHOICES, case_sensitive=False),
-    help='Data timeframe (default: TICK)',
+    help='Data timeframe (default: TICK). Use CUSTOM with --custom-tf',
+)
+@click.option(
+    '--custom-tf',
+    'custom_tf',
+    default=None,
+    help='Custom timeframe: seconds (120), or suffixed (30s, 5m, 2h, 1d). Use with -t CUSTOM',
 )
 @click.option(
     '--threads',
@@ -72,31 +81,45 @@ def validate_date(ctx, param, value):
     'data_source',
     default='auto',
     type=click.Choice(DATA_SOURCE_CHOICES, case_sensitive=False),
-    help='Data source: auto (native if available), tick, or native (default: auto)',
+    help='Data source: auto, tick, or native (default: auto)',
 )
 @click.option(
     '--price-type',
     'price_type',
     default='BID',
     type=click.Choice(PRICE_TYPE_CHOICES, case_sensitive=False),
-    help='Price type for candles: BID, ASK, or MID (default: BID)',
+    help='Price type: BID, ASK, or MID (default: BID)',
 )
-def main(symbols, start_date, end_date, timeframe, threads, output, header, resume, data_source, price_type):
+@click.option(
+    '--volume-type',
+    'volume_type',
+    default='TOTAL',
+    type=click.Choice(VOLUME_TYPE_CHOICES, case_sensitive=False),
+    help='Volume type: TOTAL, BID, ASK, or TICKS (default: TOTAL)',
+)
+def main(symbols, start_date, end_date, timeframe, custom_tf, threads,
+         output, header, resume, data_source, price_type, volume_type):
     """
     Dukascopy Historical Data Downloader
 
     Download tick or candle data from Dukascopy's historical data feed.
+    All timestamps are UTC. Output format: DD.MM.YYYY HH:MM:SS
 
     \b
     Examples:
       python cli.py EURUSD -s 2024-01-01 -e 2024-12-31 -t M1
+      python cli.py EURUSD -s 2024-01-01 -e 2024-01-02 -t S1
+      python cli.py EURUSD -s 2024-01-01 -e 2024-01-31 -t CUSTOM --custom-tf 120
+      python cli.py EURUSD -s 2024-01-01 -e 2024-01-31 -t CUSTOM --custom-tf 5m
       python cli.py EURUSD -s 2024-01-01 -e 2024-12-31 -t M1 --source native --price-type BID
-      python cli.py EURUSD GBPUSD -s 2024-01-01 -e 2024-06-30 -t TICK
-      python cli.py EURUSD -s 2024-01-01 -e 2024-12-31 -t H1 --threads 20
+      python cli.py EURUSD -s 2024-01-01 -e 2024-12-31 -t H1 --volume-type TICKS
       python cli.py EURUSD -s 2024-01-01 -e 2024-12-31 --resume
     """
     if start_date > end_date:
         raise click.BadParameter("Start date must be before or equal to end date")
+
+    if timeframe.upper() == 'CUSTOM' and not custom_tf:
+        raise click.BadParameter("--custom-tf is required when using -t CUSTOM")
 
     # Convert symbols to uppercase
     symbols = [s.upper() for s in symbols]
@@ -113,6 +136,8 @@ def main(symbols, start_date, end_date, timeframe, threads, output, header, resu
             resume=resume,
             data_source=data_source,
             price_type=price_type.upper(),
+            volume_type=volume_type.upper(),
+            custom_tf=custom_tf,
         )
     except KeyboardInterrupt:
         print("\n\n  Download interrupted. Use --resume to continue later.")
@@ -124,3 +149,4 @@ def main(symbols, start_date, end_date, timeframe, threads, output, header, resu
 
 if __name__ == '__main__':
     main()
+

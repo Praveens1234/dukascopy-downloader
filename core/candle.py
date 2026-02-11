@@ -32,7 +32,7 @@ class Candle:
             self.low = 0
 
     def __str__(self):
-        dt = datetime.fromtimestamp(self.timestamp)
+        dt = datetime.utcfromtimestamp(self.timestamp)
         return (
             f"{dt} [{self.timestamp}] -- {self.symbol} -- "
             f"{{ H:{self.high} L:{self.low} O:{self.open_price} C:{self.close_price} }}"

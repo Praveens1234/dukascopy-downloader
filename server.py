@@ -25,7 +25,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from config.settings import (
     TIMEFRAME_CHOICES, SYMBOLS, DEFAULT_THREADS, MAX_THREADS,
-    DATA_SOURCE_CHOICES, PRICE_TYPE_CHOICES, NATIVE_CANDLE_TIMEFRAMES,
+    DATA_SOURCE_CHOICES, PRICE_TYPE_CHOICES, VOLUME_TYPE_CHOICES,
+    NATIVE_CANDLE_TIMEFRAMES, resolve_custom_timeframe,
 )
 from app import run_download, generate_days, count_days
 
@@ -135,6 +136,8 @@ class DownloadRequest(BaseModel):
     threads: int = DEFAULT_THREADS
     data_source: str = "auto"   # auto, tick, native
     price_type: str = "BID"     # BID, ASK, MID
+    volume_type: str = "TOTAL"  # TOTAL, BID, ASK, TICKS
+    custom_tf: str = None       # Custom timeframe string e.g. '120', '5m'
 
 class JobResponse(BaseModel):
     id: str
@@ -169,8 +172,14 @@ def run_download_job(job_id: str, params: dict):
         threads = min(params.get("threads", DEFAULT_THREADS), MAX_THREADS)
         data_source = params.get("data_source", "auto").lower()
         price_type = params.get("price_type", "BID").upper()
+        volume_type = params.get("volume_type", "TOTAL").upper()
+        custom_tf = params.get("custom_tf", None)
 
-        tf_value = getattr(TimeFrame, timeframe_str.upper(), TimeFrame.TICK)
+        # Resolve timeframe (handle CUSTOM)
+        if timeframe_str.upper() == 'CUSTOM' and custom_tf:
+            tf_value = resolve_custom_timeframe(custom_tf)
+        else:
+            tf_value = getattr(TimeFrame, timeframe_str.upper(), TimeFrame.TICK)
         all_days = list(generate_days(start, end))
         total_days = len(all_days)
 
@@ -185,7 +194,7 @@ def run_download_job(job_id: str, params: dict):
         state.update_job(job_id, status="running", total_days=total_days * len(symbols))
         state.add_log(job_id, f"Starting download: {', '.join(symbols)}")
         state.add_log(job_id, f"Date range: {start} to {end} | Timeframe: {timeframe_str}")
-        state.add_log(job_id, f"Source: {source_label} | Price: {price_type} | Threads: {threads}")
+        state.add_log(job_id, f"Source: {source_label} | Price: {price_type} | Volume: {volume_type} | Threads: {threads}")
 
         if total_days == 0:
             state.update_job(job_id, status="completed", progress=100)
@@ -203,7 +212,8 @@ def run_download_job(job_id: str, params: dict):
 
             state.add_log(job_id, f"─── Downloading {symbol} ───")
             lock = threading.Lock()
-            csv_dumper = CSVDumper(symbol, tf_value, start, end, DATA_DIR, header=True, price_type=price_type)
+            csv_dumper = CSVDumper(symbol, tf_value, start, end, DATA_DIR, header=True,
+                                  price_type=price_type, volume_type=volume_type)
 
             if use_native:
                 # ═══ Native Candle Path (fast, no tick conversion) ═══
@@ -328,6 +338,7 @@ async def get_config():
         "timeframes": TIMEFRAME_CHOICES,
         "default_threads": DEFAULT_THREADS,
         "max_threads": MAX_THREADS,
+        "volume_types": VOLUME_TYPE_CHOICES,
     }
 
 
@@ -343,6 +354,8 @@ async def start_download(req: DownloadRequest):
         "threads": min(req.threads, MAX_THREADS),
         "data_source": req.data_source,
         "price_type": req.price_type,
+        "volume_type": req.volume_type,
+        "custom_tf": req.custom_tf,
     }
     state.create_job(job_id, params)
 

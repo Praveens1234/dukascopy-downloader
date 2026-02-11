@@ -994,16 +994,41 @@
                     <!-- Timeframe -->
                     <div class="form-group">
                         <label class="form-label">Timeframe</label>
-                        <select class="form-select" id="timeframe" onchange="updateSourceHint()">
-                            <option value="TICK">TICK</option>
+                        <select class="form-select" id="timeframe" onchange="updateSourceHint(); toggleCustomTF()">
+                            <option value="TICK">TICK (Raw Ticks)</option>
+                            <option value="S1">S1 (1 Second)</option>
+                            <option value="S10">S10 (10 Seconds)</option>
+                            <option value="S30">S30 (30 Seconds)</option>
                             <option value="M1" selected>M1 (1 Minute)</option>
+                            <option value="M2">M2 (2 Minutes)</option>
+                            <option value="M3">M3 (3 Minutes)</option>
+                            <option value="M4">M4 (4 Minutes)</option>
                             <option value="M5">M5 (5 Minutes)</option>
+                            <option value="M10">M10 (10 Minutes)</option>
                             <option value="M15">M15 (15 Minutes)</option>
                             <option value="M30">M30 (30 Minutes)</option>
                             <option value="H1">H1 (1 Hour)</option>
                             <option value="H4">H4 (4 Hours)</option>
                             <option value="D1">D1 (Daily)</option>
+                            <option value="CUSTOM">⚙ Custom...</option>
                         </select>
+                    </div>
+
+                    <!-- Custom Timeframe (hidden by default) -->
+                    <div class="form-group" id="customTFRow" style="display:none">
+                        <label class="form-label">Custom Timeframe</label>
+                        <div style="display:flex; gap:8px; align-items:center">
+                            <input type="number" class="form-input" id="customTFValue" min="1" value="120"
+                                style="flex:1" placeholder="Value">
+                            <select class="form-select" id="customTFUnit" style="flex:1">
+                                <option value="s">Seconds</option>
+                                <option value="m" selected>Minutes</option>
+                                <option value="h">Hours</option>
+                                <option value="d">Days</option>
+                            </select>
+                        </div>
+                        <div style="font-size:0.7rem; color:var(--text-muted); margin-top:4px" id="customTFHint">= 120
+                            minutes = 7200 seconds</div>
                     </div>
 
                     <!-- Data Source -->
@@ -1029,6 +1054,21 @@
                             <option value="BID" selected>BID (Default)</option>
                             <option value="ASK">ASK</option>
                             <option value="MID">MID (Average)</option>
+                        </select>
+                    </div>
+
+                    <!-- Volume Type -->
+                    <div class="form-group">
+                        <label class="form-label">Volume Type
+                            <span
+                                title="Total: ask + bid volume.\nBid: bid volume only.\nAsk: ask volume only.\nTicks: count of ticks per candle."
+                                style="cursor:help; opacity:0.6; font-size:0.75rem;">ℹ</span>
+                        </label>
+                        <select class="form-select" id="volumeType">
+                            <option value="TOTAL" selected>Total (Ask + Bid)</option>
+                            <option value="BID">Bid Volume</option>
+                            <option value="ASK">Ask Volume</option>
+                            <option value="TICKS">Tick Count</option>
                         </select>
                     </div>
 
@@ -1252,11 +1292,40 @@
             } else if (tf === 'TICK') {
                 hint.style.color = 'var(--text-muted)';
                 hint.textContent = 'Raw tick data (no conversion)';
+            } else if (tf === 'CUSTOM') {
+                hint.style.color = 'var(--text-muted)';
+                hint.textContent = 'Custom timeframe uses tick \u2192 candle conversion';
             } else {
                 hint.style.color = 'var(--warning, #f59e0b)';
                 hint.textContent = `\u26a0 ${tf} uses tick \u2192 candle conversion (native not available)`;
             }
         }
+
+        // ===== Custom TF toggle =====
+        function toggleCustomTF() {
+            const tf = document.getElementById('timeframe').value;
+            const row = document.getElementById('customTFRow');
+            row.style.display = tf === 'CUSTOM' ? 'block' : 'none';
+            if (tf === 'CUSTOM') updateCustomTFHint();
+        }
+
+        function updateCustomTFHint() {
+            const val = parseInt(document.getElementById('customTFValue').value) || 0;
+            const unit = document.getElementById('customTFUnit').value;
+            const multipliers = { s: 1, m: 60, h: 3600, d: 86400 };
+            const names = { s: 'seconds', m: 'minutes', h: 'hours', d: 'days' };
+            const totalSec = val * (multipliers[unit] || 1);
+            const hint = document.getElementById('customTFHint');
+            hint.textContent = `= ${val} ${names[unit]} = ${totalSec.toLocaleString()} seconds`;
+        }
+
+        // Attach listeners
+        document.addEventListener('DOMContentLoaded', () => {
+            const tfVal = document.getElementById('customTFValue');
+            const tfUnit = document.getElementById('customTFUnit');
+            if (tfVal) tfVal.addEventListener('input', updateCustomTFHint);
+            if (tfUnit) tfUnit.addEventListener('change', updateCustomTFHint);
+        });
 
         // ===== Start Download =====
         async function startDownload() {
@@ -1271,6 +1340,15 @@
             const threads = parseInt(document.getElementById('threads').value);
             const dataSource = document.getElementById('dataSource').value;
             const priceType = document.getElementById('priceType').value;
+            const volumeType = document.getElementById('volumeType').value;
+
+            // Build custom_tf string if CUSTOM is selected
+            let customTf = null;
+            if (timeframe === 'CUSTOM') {
+                const val = document.getElementById('customTFValue').value;
+                const unit = document.getElementById('customTFUnit').value;
+                customTf = val + unit;
+            }
 
             if (!startDate || !endDate) {
                 showToast('Please select start and end dates', 'error');
@@ -1293,15 +1371,18 @@
                         threads: threads,
                         data_source: dataSource,
                         price_type: priceType,
+                        volume_type: volumeType,
+                        custom_tf: customTf,
                     }),
                 });
                 const data = await res.json();
                 activeJobId = data.job_id;
 
                 // Show progress panel
+                const tfLabel = timeframe === 'CUSTOM' ? `Custom (${customTf})` : timeframe;
                 document.getElementById('activeJobPanel').style.display = 'block';
                 document.getElementById('activeJobTitle').textContent =
-                    `${Array.from(selectedSymbols).join(', ')} — ${timeframe} (${priceType})`;
+                    `${Array.from(selectedSymbols).join(', ')} — ${tfLabel} (${priceType})`;
                 document.getElementById('activeJobPercent').textContent = '0%';
                 document.getElementById('activeJobBar').style.width = '0%';
                 document.getElementById('activeJobBar').classList.add('active');

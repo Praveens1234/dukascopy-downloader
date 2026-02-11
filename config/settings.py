@@ -55,8 +55,13 @@ HTTP_TIMEOUT = 60             # Timeout per request in seconds
 # =============================================================================
 class TimeFrame:
     TICK = 0
+    S1   = 1
+    S10  = 10
+    S30  = 30
     M1   = 60
     M2   = 120
+    M3   = 180
+    M4   = 240
     M5   = 300
     M10  = 600
     M15  = 900
@@ -65,7 +70,37 @@ class TimeFrame:
     H4   = 14400
     D1   = 86400
 
-TIMEFRAME_CHOICES = ['TICK', 'M1', 'M2', 'M5', 'M10', 'M15', 'M30', 'H1', 'H4', 'D1']
+TIMEFRAME_CHOICES = [
+    'TICK', 'S1', 'S10', 'S30',
+    'M1', 'M2', 'M3', 'M4', 'M5', 'M10', 'M15', 'M30',
+    'H1', 'H4', 'D1',
+    'CUSTOM',
+]
+
+
+def resolve_custom_timeframe(value_str):
+    """Resolve a custom timeframe string to seconds.
+
+    Accepts:
+        - Plain integer (seconds): '120' → 120
+        - Suffixed: '30s' → 30, '5m' → 300, '2h' → 7200, '1d' → 86400
+    Returns:
+        int: timeframe in seconds
+    Raises:
+        ValueError: if format is invalid or value <= 0
+    """
+    value_str = value_str.strip().lower()
+    multipliers = {'s': 1, 'm': 60, 'h': 3600, 'd': 86400}
+
+    if value_str[-1] in multipliers:
+        num = int(value_str[:-1])
+        result = num * multipliers[value_str[-1]]
+    else:
+        result = int(value_str)
+
+    if result <= 0:
+        raise ValueError(f"Timeframe must be positive, got {result}")
+    return result
 
 # =============================================================================
 # Data Source & Price Type
@@ -83,6 +118,14 @@ class PriceType:
     MID = 'MID'
 
 PRICE_TYPE_CHOICES = ['BID', 'ASK', 'MID']
+
+class VolumeType:
+    TOTAL = 'TOTAL'   # ask_volume + bid_volume (default)
+    BID   = 'BID'     # bid_volume only
+    ASK   = 'ASK'     # ask_volume only
+    TICKS = 'TICKS'   # count of ticks in candle
+
+VOLUME_TYPE_CHOICES = ['TOTAL', 'BID', 'ASK', 'TICKS']
 
 # =============================================================================
 # Price Point Values

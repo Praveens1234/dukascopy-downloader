@@ -17,7 +17,7 @@ from core.processor import decompress
 from core.csv_dumper import CSVDumper
 from core.candle_fetch import fetch_native_candles
 from core.validator import validate_output, print_validation_report
-from config.settings import TimeFrame, SATURDAY, NATIVE_CANDLE_TIMEFRAMES
+from config.settings import TimeFrame, SATURDAY, NATIVE_CANDLE_TIMEFRAMES, resolve_custom_timeframe
 from utils.progress import DownloadProgress
 from utils.resume import save_state, load_state, clear_state
 from utils.logger import get_logger
@@ -59,7 +59,8 @@ def _should_use_native(timeframe_str, data_source):
 
 
 def run_download(symbols, start, end, threads, timeframe, folder, header, resume,
-                 data_source='auto', price_type='BID'):
+                 data_source='auto', price_type='BID', volume_type='TOTAL',
+                 custom_tf=None):
     """
     Main download orchestrator.
     Downloads tick data for all symbols in the date range,
@@ -67,11 +68,20 @@ def run_download(symbols, start, end, threads, timeframe, folder, header, resume
 
     Args:
         data_source: 'auto', 'tick', or 'native'
-        price_type: 'BID', 'ASK', or 'MID' (for tick conversion and native candles)
+        price_type: 'BID', 'ASK', or 'MID'
+        volume_type: 'TOTAL', 'BID', 'ASK', or 'TICKS'
+        custom_tf: Custom timeframe string (e.g. '120', '30s', '2m')
     """
     os.makedirs(folder, exist_ok=True)
 
-    tf_value = getattr(TimeFrame, timeframe.upper(), TimeFrame.TICK)
+    # Resolve timeframe
+    if timeframe.upper() == 'CUSTOM' and custom_tf:
+        tf_value = resolve_custom_timeframe(custom_tf)
+        tf_label = f"Custom ({tf_value}s)"
+    else:
+        tf_value = getattr(TimeFrame, timeframe.upper(), TimeFrame.TICK)
+        tf_label = timeframe
+
     total_days = count_days(start, end)
 
     if total_days == 0:
@@ -88,8 +98,8 @@ def run_download(symbols, start, end, threads, timeframe, folder, header, resume
     print(f"{'=' * 60}")
     print(f"  Symbols:    {', '.join(symbols)}")
     print(f"  Date Range: {start} to {end}")
-    print(f"  Timeframe:  {timeframe}")
-    print(f"  Source:     {source_label} ({price_type})")
+    print(f"  Timeframe:  {tf_label}")
+    print(f"  Source:     {source_label} | Price: {price_type} | Vol: {volume_type}")
     print(f"  Days:       {total_days}")
     print(f"  Threads:    {threads}")
     print(f"  Output:     {os.path.abspath(folder)}")
@@ -99,21 +109,21 @@ def run_download(symbols, start, end, threads, timeframe, folder, header, resume
         if use_native:
             _download_symbol_native(
                 symbol, start, end, timeframe, tf_value,
-                folder, header, price_type,
+                folder, header, price_type, volume_type,
             )
         else:
             _download_symbol(
                 symbol, start, end, all_days, total_days,
-                threads, tf_value, folder, header, resume, price_type,
+                threads, tf_value, folder, header, resume, price_type, volume_type,
             )
 
 
 def _download_symbol_native(symbol, start, end, timeframe_str, tf_value,
-                            folder, header, price_type):
+                            folder, header, price_type, volume_type='TOTAL'):
     """Download data for a single symbol using native candle data."""
     print(f"  ⚡ {symbol}: Fetching native {timeframe_str} candles ({price_type})...")
 
-    csv_dumper = CSVDumper(symbol, tf_value, start, end, folder, header, price_type)
+    csv_dumper = CSVDumper(symbol, tf_value, start, end, folder, header, price_type, volume_type)
 
     try:
         candles = fetch_native_candles(symbol, start, end, timeframe_str.upper(), price_type)
@@ -136,7 +146,8 @@ def _download_symbol_native(symbol, start, end, timeframe_str, tf_value,
 
 
 def _download_symbol(symbol, start, end, all_days, total_days,
-                     threads, timeframe, folder, header, resume, price_type='BID'):
+                     threads, timeframe, folder, header, resume,
+                     price_type='BID', volume_type='TOTAL'):
     """Download data for a single symbol using tick-to-candle conversion."""
     lock = threading.Lock()
     day_counter = [0]  # Use list for mutability in closure
@@ -158,7 +169,7 @@ def _download_symbol(symbol, start, end, all_days, total_days,
         return
 
     progress = DownloadProgress(len(pending_days), symbol)
-    csv_dumper = CSVDumper(symbol, timeframe, start, end, folder, header, price_type)
+    csv_dumper = CSVDumper(symbol, timeframe, start, end, folder, header, price_type, volume_type)
     completed_list = list(completed_dates)
 
     def do_work(day):

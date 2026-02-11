@@ -1,6 +1,7 @@
 """
 CSV Dumper - Buffers tick data per day, aggregates to candles, and writes merged CSV.
-Enhanced with UTC-safe bucketing, BID/ASK/MID price type support, and native candle mode.
+Enhanced with UTC-safe bucketing, BID/ASK/MID price type support, volume type selection,
+native candle mode, and DD.MM.YYYY HH:MM:SS datetime format.
 """
 
 import csv
@@ -15,6 +16,9 @@ from config.settings import TimeFrame
 # Output filename template: SYMBOL-STARTDATE_ENDDATE.csv
 TEMPLATE_FILE_NAME = "{}-{}_{:02d}_{:02d}-{}_{:02d}_{:02d}.csv"
 
+# Datetime format for CSV output (DD.MM.YYYY HH:MM:SS, UTC)
+DATETIME_FORMAT = '%d.%m.%Y %H:%M:%S'
+
 
 def format_float(number):
     """Format price to 5 decimal places."""
@@ -22,8 +26,15 @@ def format_float(number):
 
 
 def stringify_utc(unix_ts):
-    """Convert unix timestamp to UTC datetime string."""
-    return str(datetime.utcfromtimestamp(unix_ts))
+    """Convert unix timestamp to UTC datetime string in DD.MM.YYYY HH:MM:SS format."""
+    return datetime.utcfromtimestamp(unix_ts).strftime(DATETIME_FORMAT)
+
+
+def format_datetime(dt):
+    """Format a datetime object to DD.MM.YYYY HH:MM:SS."""
+    if isinstance(dt, datetime):
+        return dt.strftime(DATETIME_FORMAT)
+    return str(dt)
 
 
 class CSVDumper:
@@ -37,7 +48,8 @@ class CSVDumper:
       - Native candle data (pre-computed by Dukascopy)
     """
 
-    def __init__(self, symbol, timeframe, start, end, folder, header=True, price_type='BID'):
+    def __init__(self, symbol, timeframe, start, end, folder, header=True,
+                 price_type='BID', volume_type='TOTAL'):
         self.symbol = symbol
         self.timeframe = timeframe
         self.start = start
@@ -45,6 +57,7 @@ class CSVDumper:
         self.folder = folder
         self.include_header = header
         self.price_type = price_type.upper() if price_type else 'BID'
+        self.volume_type = volume_type.upper() if volume_type else 'TOTAL'
         self.buffer = {}  # {date: [ticks or candles]}
         self.native_candles = []  # For native candle mode
 
@@ -70,6 +83,20 @@ class CSVDumper:
             return (tick[1] + tick[2]) / 2.0
         else:  # BID (default, matches Dukascopy website)
             return tick[2]
+
+    def _get_volume(self, tick):
+        """Extract volume from tick based on volume_type setting.
+
+        Tick format: (datetime, ask, bid, ask_volume, bid_volume)
+        """
+        if self.volume_type == 'BID':
+            return tick[4]
+        elif self.volume_type == 'ASK':
+            return tick[3]
+        elif self.volume_type == 'TICKS':
+            return 1  # Each tick counts as 1
+        else:  # TOTAL (default)
+            return tick[3] + tick[4]
 
     def append(self, day, ticks):
         """
@@ -111,7 +138,7 @@ class CSVDumper:
                 current_volumes = []
 
             current_prices.append(self._get_price(tick))
-            current_volumes.append(tick[3] + tick[4])  # Total volume
+            current_volumes.append(self._get_volume(tick))
             previous_key = key
 
         # Last candle
@@ -148,7 +175,7 @@ class CSVDumper:
                 self.native_candles.sort(key=lambda c: c[0])
                 for c in self.native_candles:
                     writer.writerow({
-                        'time': c[0],  # datetime object
+                        'time': format_datetime(c[0]),
                         'open': format_float(c[1]),
                         'high': format_float(c[2]),
                         'low': format_float(c[3]),
@@ -161,7 +188,7 @@ class CSVDumper:
                     for value in self.buffer[day]:
                         if self.timeframe == TimeFrame.TICK:
                             writer.writerow({
-                                'time': value[0],
+                                'time': format_datetime(value[0]),
                                 'ask': format_float(value[1]),
                                 'bid': format_float(value[2]),
                                 'ask_volume': value[3],

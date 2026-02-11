@@ -2,6 +2,7 @@
 Dukascopy Historical Data Downloader - Main Application
 Orchestrates the download pipeline: fetch -> decompress -> aggregate -> dump.
 Production-ready with anti-rate-limiting measures.
+Supports native candle data and tick-to-candle conversion.
 """
 
 import concurrent.futures
@@ -14,8 +15,9 @@ from datetime import timedelta, date
 from core.fetch import fetch_day
 from core.processor import decompress
 from core.csv_dumper import CSVDumper
+from core.candle_fetch import fetch_native_candles
 from core.validator import validate_output, print_validation_report
-from config.settings import TimeFrame, SATURDAY
+from config.settings import TimeFrame, SATURDAY, NATIVE_CANDLE_TIMEFRAMES
 from utils.progress import DownloadProgress
 from utils.resume import save_state, load_state, clear_state
 from utils.logger import get_logger
@@ -40,11 +42,32 @@ def count_days(start, end):
     return sum(1 for _ in generate_days(start, end))
 
 
-def run_download(symbols, start, end, threads, timeframe, folder, header, resume):
+def _should_use_native(timeframe_str, data_source):
+    """Determine if native candle data should be used."""
+    tf_upper = timeframe_str.upper()
+    if data_source == 'native':
+        if tf_upper not in NATIVE_CANDLE_TIMEFRAMES:
+            raise ValueError(
+                f"Native candle data not available for {tf_upper}. "
+                f"Only {', '.join(sorted(NATIVE_CANDLE_TIMEFRAMES))} are supported. "
+                f"Use 'auto' or 'tick' data source instead."
+            )
+        return True
+    elif data_source == 'auto':
+        return tf_upper in NATIVE_CANDLE_TIMEFRAMES and tf_upper != 'TICK'
+    return False  # data_source == 'tick'
+
+
+def run_download(symbols, start, end, threads, timeframe, folder, header, resume,
+                 data_source='auto', price_type='BID'):
     """
     Main download orchestrator.
     Downloads tick data for all symbols in the date range,
     aggregates to the specified timeframe, and writes CSV output.
+
+    Args:
+        data_source: 'auto', 'tick', or 'native'
+        price_type: 'BID', 'ASK', or 'MID' (for tick conversion and native candles)
     """
     os.makedirs(folder, exist_ok=True)
 
@@ -55,6 +78,9 @@ def run_download(symbols, start, end, threads, timeframe, folder, header, resume
         print("No trading days in the specified range.")
         return
 
+    use_native = _should_use_native(timeframe, data_source)
+    source_label = "Native Candle" if use_native else "Tick → Candle"
+
     all_days = list(generate_days(start, end))
 
     print(f"\n{'=' * 60}")
@@ -63,21 +89,55 @@ def run_download(symbols, start, end, threads, timeframe, folder, header, resume
     print(f"  Symbols:    {', '.join(symbols)}")
     print(f"  Date Range: {start} to {end}")
     print(f"  Timeframe:  {timeframe}")
+    print(f"  Source:     {source_label} ({price_type})")
     print(f"  Days:       {total_days}")
     print(f"  Threads:    {threads}")
     print(f"  Output:     {os.path.abspath(folder)}")
     print(f"{'=' * 60}\n")
 
     for symbol in symbols:
-        _download_symbol(
-            symbol, start, end, all_days, total_days,
-            threads, tf_value, folder, header, resume,
-        )
+        if use_native:
+            _download_symbol_native(
+                symbol, start, end, timeframe, tf_value,
+                folder, header, price_type,
+            )
+        else:
+            _download_symbol(
+                symbol, start, end, all_days, total_days,
+                threads, tf_value, folder, header, resume, price_type,
+            )
+
+
+def _download_symbol_native(symbol, start, end, timeframe_str, tf_value,
+                            folder, header, price_type):
+    """Download data for a single symbol using native candle data."""
+    print(f"  ⚡ {symbol}: Fetching native {timeframe_str} candles ({price_type})...")
+
+    csv_dumper = CSVDumper(symbol, tf_value, start, end, folder, header, price_type)
+
+    try:
+        candles = fetch_native_candles(symbol, start, end, timeframe_str.upper(), price_type)
+        csv_dumper.append_native_candles(candles)
+        print(f"  ✓ {symbol}: Got {len(candles)} native candles")
+    except Exception as e:
+        Logger.error(f"Native candle fetch failed for {symbol}: {e}")
+        print(f"  ✗ {symbol}: Native fetch failed — {str(e)[:60]}")
+        return
+
+    # Write CSV
+    start_time = time.time()
+    file_path = csv_dumper.dump()
+    elapsed = time.time() - start_time
+    print(f"  ✓ {symbol}: Written to {file_path} ({elapsed:.1f}s)")
+
+    # Validate
+    results = validate_output(file_path, start, end, symbol)
+    print_validation_report(results)
 
 
 def _download_symbol(symbol, start, end, all_days, total_days,
-                     threads, timeframe, folder, header, resume):
-    """Download data for a single symbol."""
+                     threads, timeframe, folder, header, resume, price_type='BID'):
+    """Download data for a single symbol using tick-to-candle conversion."""
     lock = threading.Lock()
     day_counter = [0]  # Use list for mutability in closure
 
@@ -98,7 +158,7 @@ def _download_symbol(symbol, start, end, all_days, total_days,
         return
 
     progress = DownloadProgress(len(pending_days), symbol)
-    csv_dumper = CSVDumper(symbol, timeframe, start, end, folder, header)
+    csv_dumper = CSVDumper(symbol, timeframe, start, end, folder, header, price_type)
     completed_list = list(completed_dates)
 
     def do_work(day):

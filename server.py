@@ -23,7 +23,10 @@ from pydantic import BaseModel
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from config.settings import TIMEFRAME_CHOICES, SYMBOLS, DEFAULT_THREADS, MAX_THREADS
+from config.settings import (
+    TIMEFRAME_CHOICES, SYMBOLS, DEFAULT_THREADS, MAX_THREADS,
+    DATA_SOURCE_CHOICES, PRICE_TYPE_CHOICES, NATIVE_CANDLE_TIMEFRAMES,
+)
 from app import run_download, generate_days, count_days
 
 # =============================================================================
@@ -130,6 +133,8 @@ class DownloadRequest(BaseModel):
     end_date: str    # YYYY-MM-DD
     timeframe: str = "M1"
     threads: int = DEFAULT_THREADS
+    data_source: str = "auto"   # auto, tick, native
+    price_type: str = "BID"     # BID, ASK, MID
 
 class JobResponse(BaseModel):
     id: str
@@ -152,6 +157,7 @@ def run_download_job(job_id: str, params: dict):
     from core.fetch import fetch_day
     from core.processor import decompress
     from core.csv_dumper import CSVDumper
+    from core.candle_fetch import fetch_native_candles
     from core.validator import validate_output
     from config.settings import TimeFrame, SATURDAY
 
@@ -161,15 +167,25 @@ def run_download_job(job_id: str, params: dict):
         end = datetime.strptime(params["end_date"], "%Y-%m-%d").date()
         timeframe_str = params["timeframe"]
         threads = min(params.get("threads", DEFAULT_THREADS), MAX_THREADS)
+        data_source = params.get("data_source", "auto").lower()
+        price_type = params.get("price_type", "BID").upper()
 
         tf_value = getattr(TimeFrame, timeframe_str.upper(), TimeFrame.TICK)
         all_days = list(generate_days(start, end))
         total_days = len(all_days)
 
+        # Determine if native candle path should be used
+        tf_upper = timeframe_str.upper()
+        use_native = (
+            (data_source == 'native' and tf_upper in NATIVE_CANDLE_TIMEFRAMES) or
+            (data_source == 'auto' and tf_upper in NATIVE_CANDLE_TIMEFRAMES and tf_upper != 'TICK')
+        )
+        source_label = "Native Candle" if use_native else "Tick → Candle"
+
         state.update_job(job_id, status="running", total_days=total_days * len(symbols))
         state.add_log(job_id, f"Starting download: {', '.join(symbols)}")
         state.add_log(job_id, f"Date range: {start} to {end} | Timeframe: {timeframe_str}")
-        state.add_log(job_id, f"Trading days: {total_days} | Threads: {threads}")
+        state.add_log(job_id, f"Source: {source_label} | Price: {price_type} | Threads: {threads}")
 
         if total_days == 0:
             state.update_job(job_id, status="completed", progress=100)
@@ -187,54 +203,65 @@ def run_download_job(job_id: str, params: dict):
 
             state.add_log(job_id, f"─── Downloading {symbol} ───")
             lock = threading.Lock()
-            csv_dumper = CSVDumper(symbol, tf_value, start, end, DATA_DIR, header=True)
+            csv_dumper = CSVDumper(symbol, tf_value, start, end, DATA_DIR, header=True, price_type=price_type)
 
-            def do_work(day, sym=symbol):
+            if use_native:
+                # ═══ Native Candle Path (fast, no tick conversion) ═══
+                state.add_log(job_id, f"  ⚡ Fetching native {timeframe_str} candles ({price_type})...")
                 try:
-                    raw = fetch_day(sym, day)
-                    ticks = decompress(sym, day, raw)
-                    with lock:
-                        csv_dumper.append(day, ticks)
-                    tick_count = len(ticks) if ticks else 0
-                    state.add_log(job_id, f"  ✓ {sym} {day} — {tick_count:,} ticks")
-                except Exception as e:
-                    state.add_log(job_id, f"  ✗ {sym} {day} — {str(e)[:80]}")
-                finally:
-                    global_completed[0] += 1
-                    pct = round(global_completed[0] / global_total * 100, 1)
-                    state.update_job(
-                        job_id,
-                        completed_days=global_completed[0],
-                        progress=pct,
-                    )
-                    # Broadcast progress via event loop
+                    candles = fetch_native_candles(symbol, start, end, tf_upper, price_type)
+                    csv_dumper.append_native_candles(candles)
+                    state.add_log(job_id, f"  ✓ {symbol}: Got {len(candles)} native candles")
+                    global_completed[0] += total_days
+                    state.update_job(job_id, completed_days=global_completed[0], progress=round(global_completed[0] / global_total * 100, 1))
                     try:
-                        asyncio.run_coroutine_threadsafe(
-                            state.broadcast_progress(job_id), state._loop
-                        )
+                        asyncio.run_coroutine_threadsafe(state.broadcast_progress(job_id), state._loop)
                     except Exception:
                         pass
+                except Exception as e:
+                    state.add_log(job_id, f"  ✗ Native fetch failed: {str(e)[:80]}")
+                    global_completed[0] += total_days
+                    state.update_job(job_id, completed_days=global_completed[0], progress=round(global_completed[0] / global_total * 100, 1))
+            else:
+                # ═══ Tick-to-Candle Path (original, with accuracy fixes) ═══
+                def do_work(day, sym=symbol):
+                    try:
+                        raw = fetch_day(sym, day)
+                        ticks = decompress(sym, day, raw)
+                        with lock:
+                            csv_dumper.append(day, ticks)
+                        tick_count = len(ticks) if ticks else 0
+                        state.add_log(job_id, f"  ✓ {sym} {day} — {tick_count:,} ticks")
+                    except Exception as e:
+                        state.add_log(job_id, f"  ✗ {sym} {day} — {str(e)[:80]}")
+                    finally:
+                        global_completed[0] += 1
+                        pct = round(global_completed[0] / global_total * 100, 1)
+                        state.update_job(
+                            job_id,
+                            completed_days=global_completed[0],
+                            progress=pct,
+                        )
+                        try:
+                            asyncio.run_coroutine_threadsafe(
+                                state.broadcast_progress(job_id), state._loop
+                            )
+                        except Exception:
+                            pass
 
-            with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as executor:
-                futures = []
-                for i, day in enumerate(all_days):
-                    # Check cancellation during submission
-                    if state.cancel_events[job_id].is_set():
-                        state.add_log(job_id, "⚠ Cancelling... stopping new tasks.")
-                        break
+                with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as executor:
+                    futures = []
+                    for i, day in enumerate(all_days):
+                        if state.cancel_events[job_id].is_set():
+                            state.add_log(job_id, "⚠ Cancelling... stopping new tasks.")
+                            break
+                        futures.append(executor.submit(do_work, day))
+                        if i > 0 and i % threads == 0:
+                            time.sleep(0.3)
+                    concurrent.futures.wait(futures)
 
-                    futures.append(executor.submit(do_work, day))
-                    if i > 0 and i % threads == 0:
-                        time.sleep(0.3)
-                concurrent.futures.wait(futures)
-
-            if state.cancel_events[job_id].is_set():
-                 state.add_log(job_id, "⚠ Symbol download cancelled.")
-                 # Don't dump CSV if cancelled to avoid partial data?
-                 # Or dump what we have? Let's dump what we have but mark as partial.
-                 # Actually, usually users want to stop because they made a mistake.
-                 # Let's write what we have but stop processing.
-                 pass
+                if state.cancel_events[job_id].is_set():
+                    state.add_log(job_id, "⚠ Symbol download cancelled.")
 
             # Write CSV
             file_path = csv_dumper.dump()
@@ -314,6 +341,8 @@ async def start_download(req: DownloadRequest):
         "end_date": req.end_date,
         "timeframe": req.timeframe,
         "threads": min(req.threads, MAX_THREADS),
+        "data_source": req.data_source,
+        "price_type": req.price_type,
     }
     state.create_job(job_id, params)
 

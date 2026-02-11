@@ -994,7 +994,7 @@
                     <!-- Timeframe -->
                     <div class="form-group">
                         <label class="form-label">Timeframe</label>
-                        <select class="form-select" id="timeframe">
+                        <select class="form-select" id="timeframe" onchange="updateSourceHint()">
                             <option value="TICK">TICK</option>
                             <option value="M1" selected>M1 (1 Minute)</option>
                             <option value="M5">M5 (5 Minutes)</option>
@@ -1003,6 +1003,32 @@
                             <option value="H1">H1 (1 Hour)</option>
                             <option value="H4">H4 (4 Hours)</option>
                             <option value="D1">D1 (Daily)</option>
+                        </select>
+                    </div>
+
+                    <!-- Data Source -->
+                    <div class="form-group">
+                        <label class="form-label">Data Source
+                            <span
+                                title="Native: direct OHLC from Dukascopy (M1/H1/D1 only).\nTick: fetch ticks and convert to candles.\nAuto: native if available, else tick."
+                                style="cursor:help; opacity:0.6; font-size:0.75rem;">ℹ</span>
+                        </label>
+                        <select class="form-select" id="dataSource">
+                            <option value="auto" selected>Auto (Recommended)</option>
+                            <option value="tick">Tick → Candle</option>
+                            <option value="native">Native OHLC</option>
+                        </select>
+                        <div id="sourceHint" style="font-size:0.7rem; color:var(--success); margin-top:4px;">✓ Native
+                            candles available for M1</div>
+                    </div>
+
+                    <!-- Price Type -->
+                    <div class="form-group">
+                        <label class="form-label">Price Type</label>
+                        <select class="form-select" id="priceType">
+                            <option value="BID" selected>BID (Default)</option>
+                            <option value="ASK">ASK</option>
+                            <option value="MID">MID (Average)</option>
                         </select>
                     </div>
 
@@ -1215,6 +1241,23 @@
             if (tab === 'jobs') loadJobs();
         }
 
+        // ===== Source Hint =====
+        function updateSourceHint() {
+            const tf = document.getElementById('timeframe').value;
+            const hint = document.getElementById('sourceHint');
+            const nativeTFs = ['M1', 'H1', 'D1'];
+            if (nativeTFs.includes(tf)) {
+                hint.style.color = 'var(--success)';
+                hint.textContent = `\u2713 Native candles available for ${tf}`;
+            } else if (tf === 'TICK') {
+                hint.style.color = 'var(--text-muted)';
+                hint.textContent = 'Raw tick data (no conversion)';
+            } else {
+                hint.style.color = 'var(--warning, #f59e0b)';
+                hint.textContent = `\u26a0 ${tf} uses tick \u2192 candle conversion (native not available)`;
+            }
+        }
+
         // ===== Start Download =====
         async function startDownload() {
             if (selectedSymbols.size === 0) {
@@ -1226,6 +1269,8 @@
             const endDate = document.getElementById('endDate').value;
             const timeframe = document.getElementById('timeframe').value;
             const threads = parseInt(document.getElementById('threads').value);
+            const dataSource = document.getElementById('dataSource').value;
+            const priceType = document.getElementById('priceType').value;
 
             if (!startDate || !endDate) {
                 showToast('Please select start and end dates', 'error');
@@ -1246,6 +1291,8 @@
                         end_date: endDate,
                         timeframe: timeframe,
                         threads: threads,
+                        data_source: dataSource,
+                        price_type: priceType,
                     }),
                 });
                 const data = await res.json();
@@ -1254,7 +1301,7 @@
                 // Show progress panel
                 document.getElementById('activeJobPanel').style.display = 'block';
                 document.getElementById('activeJobTitle').textContent =
-                    `${Array.from(selectedSymbols).join(', ')} — ${timeframe}`;
+                    `${Array.from(selectedSymbols).join(', ')} — ${timeframe} (${priceType})`;
                 document.getElementById('activeJobPercent').textContent = '0%';
                 document.getElementById('activeJobBar').style.width = '0%';
                 document.getElementById('activeJobBar').classList.add('active');

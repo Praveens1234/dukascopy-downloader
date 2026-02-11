@@ -4,12 +4,23 @@ Production-ready settings with anti-rate-limiting measures.
 """
 
 # =============================================================================
-# URL Template
+# URL Templates
 # =============================================================================
 URL_TEMPLATE = (
     "https://www.dukascopy.com/datafeed/"
     "{currency}/{year}/{month:02d}/{day:02d}/{hour:02d}h_ticks.bi5"
 )
+
+# Native candle URL templates (Dukascopy serves pre-computed OHLC for M1, H1, D1)
+# Month is 0-indexed in Dukascopy URLs (00=Jan, 11=Dec)
+CANDLE_URL_TEMPLATES = {
+    'M1': "https://www.dukascopy.com/datafeed/{currency}/{year}/{month:02d}/{day:02d}/{price_type}_candles_min_1.bi5",
+    'H1': "https://www.dukascopy.com/datafeed/{currency}/{year}/{month:02d}/{price_type}_candles_hour_1.bi5",
+    'D1': "https://www.dukascopy.com/datafeed/{currency}/{year}/{price_type}_candles_day_1.bi5",
+}
+
+# Timeframes that have native candle data on Dukascopy
+NATIVE_CANDLE_TIMEFRAMES = {'M1', 'H1', 'D1'}
 
 # =============================================================================
 # HTTP Headers (browser-like to avoid 503 blocks)
@@ -55,6 +66,23 @@ class TimeFrame:
     D1   = 86400
 
 TIMEFRAME_CHOICES = ['TICK', 'M1', 'M2', 'M5', 'M10', 'M15', 'M30', 'H1', 'H4', 'D1']
+
+# =============================================================================
+# Data Source & Price Type
+# =============================================================================
+class DataSource:
+    AUTO   = 'auto'    # Use native if available, else tick conversion
+    TICK   = 'tick'    # Always fetch ticks and convert
+    NATIVE = 'native'  # Use native candle data (only M1, H1, D1)
+
+DATA_SOURCE_CHOICES = ['auto', 'tick', 'native']
+
+class PriceType:
+    BID = 'BID'
+    ASK = 'ASK'
+    MID = 'MID'
+
+PRICE_TYPE_CHOICES = ['BID', 'ASK', 'MID']
 
 # =============================================================================
 # Price Point Values

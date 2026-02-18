@@ -19,8 +19,8 @@ client = TestClient(app)
 
 @pytest.fixture
 def mock_fetch_native():
-    # Patch fetch_native_candles to avoid real network calls
-    with patch('core.candle_fetch.fetch_native_candles') as mock:
+    # Patch fetch_native_candles where it is imported in core.service
+    with patch('core.service.fetch_native_candles') as mock:
         # Return dummy candles: (datetime, open, high, low, close, volume)
         mock.return_value = [
             (datetime(2023, 1, 1, 0, 0), 1.0, 1.1, 0.9, 1.05, 100),

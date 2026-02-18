@@ -11,7 +11,6 @@ import asyncio
 import random
 import struct
 from datetime import datetime, date, timedelta
-from calendar import monthrange
 from lzma import LZMADecompressor, LZMAError, FORMAT_AUTO
 
 import aiohttp
@@ -23,6 +22,7 @@ from config.settings import (
     REQUEST_DELAY, HOURLY_CONCURRENCY,
 )
 from utils.logger import get_logger
+from core.exceptions import BackoffError
 
 Logger = get_logger()
 
@@ -94,29 +94,42 @@ async def _download_candle_file(session, url, semaphore):
     async with semaphore:
         for attempt in range(DOWNLOAD_ATTEMPTS):
             try:
+                # Add jitter to timeout
+                timeout = aiohttp.ClientTimeout(
+                    total=HTTP_TIMEOUT + random.uniform(0, 5),
+                    connect=10,
+                    sock_read=HTTP_TIMEOUT
+                )
+
                 async with session.get(
                     url,
                     headers=HTTP_HEADERS,
-                    timeout=aiohttp.ClientTimeout(total=HTTP_TIMEOUT),
+                    timeout=timeout,
                 ) as resp:
                     if resp.status == 200:
                         data = await resp.read()
                         return data
                     elif resp.status == 404:
                         return b""  # No data for this period
-                    elif resp.status == 503:
+                    elif resp.status in [500, 502, 503, 504]:
                         delay = min(
                             RETRY_BASE_DELAY * (2 ** attempt) + random.uniform(0.5, 2.0),
                             RETRY_MAX_DELAY
                         )
-                        last_error = f"HTTP 503 (rate limited)"
+                        last_error = f"HTTP {resp.status}"
                         await asyncio.sleep(delay)
                     else:
+                        delay = RETRY_BASE_DELAY * (attempt + 1) + random.uniform(0, 1)
                         last_error = f"HTTP {resp.status}"
-                        await asyncio.sleep(RETRY_BASE_DELAY)
+                        await asyncio.sleep(delay)
             except (aiohttp.ClientError, asyncio.TimeoutError) as e:
                 last_error = str(e)
-                await asyncio.sleep(RETRY_BASE_DELAY * (attempt + 1))
+                delay = min(RETRY_BASE_DELAY * (2 ** attempt), RETRY_MAX_DELAY)
+                await asyncio.sleep(delay)
+
+        # Propagate backoff if repeated 503s
+        if last_error and "503" in last_error:
+            raise BackoffError(f"Repeated 503 errors for {url}")
 
     Logger.warning(f"Failed to download candle file after {DOWNLOAD_ATTEMPTS} retries: {last_error}")
     return b""
@@ -181,16 +194,6 @@ def _build_d1_urls(symbol, start_date, end_date, price_type):
 async def fetch_native_candles_async(symbol, start_date, end_date, timeframe_str, price_type='BID'):
     """
     Fetch native candle data from Dukascopy.
-
-    Args:
-        symbol: e.g. 'EURUSD'
-        start_date: date object
-        end_date: date object
-        timeframe_str: 'M1', 'H1', or 'D1'
-        price_type: 'BID' or 'ASK'
-
-    Returns:
-        List of (datetime, open, high, low, close, volume) tuples, filtered to date range.
     """
     if timeframe_str == 'M1':
         url_pairs = _build_m1_urls(symbol, start_date, end_date, price_type)
@@ -204,11 +207,14 @@ async def fetch_native_candles_async(symbol, start_date, end_date, timeframe_str
     all_candles = []
     semaphore = asyncio.Semaphore(HOURLY_CONCURRENCY)
 
+    # Optimized Connector
     connector = aiohttp.TCPConnector(
         limit=HOURLY_CONCURRENCY,
         limit_per_host=HOURLY_CONCURRENCY,
         force_close=False,
         enable_cleanup_closed=True,
+        ttl_dns_cache=300,
+        keepalive_timeout=30,
     )
 
     async with aiohttp.ClientSession(connector=connector) as session:
@@ -223,6 +229,8 @@ async def fetch_native_candles_async(symbol, start_date, end_date, timeframe_str
 
         for (base_date, url, _), compressed_data in zip(tasks, results):
             if isinstance(compressed_data, Exception):
+                if isinstance(compressed_data, BackoffError):
+                    raise compressed_data
                 Logger.error(f"Error fetching {url}: {compressed_data}")
                 continue
             if not compressed_data or len(compressed_data) == 0:
@@ -257,4 +265,19 @@ async def fetch_native_candles_async(symbol, start_date, end_date, timeframe_str
 
 def fetch_native_candles(symbol, start_date, end_date, timeframe_str, price_type='BID'):
     """Synchronous wrapper for native candle fetching."""
-    return asyncio.run(fetch_native_candles_async(symbol, start_date, end_date, timeframe_str, price_type))
+    # Create a fresh loop for this thread if needed
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_closed():
+             raise RuntimeError
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
+    if loop.is_running():
+         future = asyncio.run_coroutine_threadsafe(
+             fetch_native_candles_async(symbol, start_date, end_date, timeframe_str, price_type), loop
+         )
+         return future.result()
+    else:
+        return loop.run_until_complete(fetch_native_candles_async(symbol, start_date, end_date, timeframe_str, price_type))

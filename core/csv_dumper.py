@@ -26,14 +26,20 @@ def format_float(number):
 
 
 def stringify_utc(unix_ts):
-    """Convert unix timestamp to UTC datetime string in DD.MM.YYYY HH:MM:SS format."""
-    return datetime.utcfromtimestamp(unix_ts).strftime(DATETIME_FORMAT)
+    """Convert unix timestamp to UTC datetime string in DD.MM.YYYY HH:MM:SS[.mmm] format."""
+    dt = datetime.utcfromtimestamp(unix_ts)
+    return format_datetime(dt)
 
 
 def format_datetime(dt):
-    """Format a datetime object to DD.MM.YYYY HH:MM:SS."""
+    """Format a datetime object to DD.MM.YYYY HH:MM:SS[.mmm]."""
     if isinstance(dt, datetime):
-        return dt.strftime(DATETIME_FORMAT)
+        s = dt.strftime(DATETIME_FORMAT)
+        if dt.microsecond > 0:
+            # Append milliseconds (first 3 digits of microsecond)
+            ms = f"{dt.microsecond:06d}"[:3]
+            return f"{s}.{ms}"
+        return s
     return str(dt)
 
 

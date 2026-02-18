@@ -1633,15 +1633,14 @@
                 try {
                     const res = await fetch(`/api/jobs/${activeJobId}`);
                     const job = await res.json();
-                    if (job.status === 'completed' || job.status === 'failed') {
-                        updateProgress({
-                            job_id: activeJobId,
-                            status: job.status,
-                            progress: job.progress,
-                            completed_days: job.completed_days,
-                            total_days: job.total_days,
-                        });
-                    }
+                    // Always update UI from polling to handle lost WS packets
+                    updateProgress({
+                        job_id: activeJobId,
+                        status: job.status,
+                        progress: job.progress,
+                        completed_days: job.completed_days,
+                        total_days: job.total_days,
+                    });
                 } catch (e) { }
             }
         }, 3000);

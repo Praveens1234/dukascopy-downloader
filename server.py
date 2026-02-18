@@ -259,6 +259,7 @@ def run_download_job(job_id: str, params: dict):
         service._cancel_event = state.cancel_events[job_id]
 
         state.update_job(job_id, status="running")
+        asyncio.run_coroutine_threadsafe(state.broadcast_progress(job_id), state._loop)
         state.add_log(job_id, f"Starting download job...")
 
         service.run()
@@ -270,6 +271,7 @@ def run_download_job(job_id: str, params: dict):
                 finished_at=datetime.now().isoformat(),
                 output_file="Partial"
             )
+             asyncio.run_coroutine_threadsafe(state.broadcast_progress(job_id), state._loop)
              state.add_log(job_id, "Download Cancelled.")
         else:
              # Check if any files produced
@@ -281,11 +283,13 @@ def run_download_job(job_id: str, params: dict):
                 finished_at=datetime.now().isoformat(),
                 output_file=", ".join(output_files) if output_files else "None"
             )
+             asyncio.run_coroutine_threadsafe(state.broadcast_progress(job_id), state._loop)
              state.add_log(job_id, "Download Complete.")
 
     except Exception as e:
         state.update_job(job_id, status="failed", error=str(e),
                          finished_at=datetime.now().isoformat())
+        asyncio.run_coroutine_threadsafe(state.broadcast_progress(job_id), state._loop)
         state.add_log(job_id, f"FATAL ERROR: {str(e)}")
 
 

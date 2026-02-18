@@ -9,17 +9,22 @@ import json
 import os
 import sys
 import threading
+import concurrent.futures
 import time
 import uuid
 from datetime import datetime, date
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+# Force UTF-8 for Windows console output
+sys.stdout.reconfigure(encoding='utf-8')
+sys.stderr.reconfigure(encoding='utf-8')
+
+from fastapi import FastAPI, WebSocket, Request, BackgroundTasks
+from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
-
+from starlette.websockets import WebSocketDisconnect
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -137,7 +142,7 @@ class DownloadRequest(BaseModel):
     data_source: str = "auto"   # auto, tick, native
     price_type: str = "BID"     # BID, ASK, MID
     volume_type: str = "TOTAL"  # TOTAL, BID, ASK, TICKS
-    custom_tf: str = None       # Custom timeframe string e.g. '120', '5m'
+    custom_tf: Optional[str] = None       # Custom timeframe string e.g. '120', '5m'
 
 class JobResponse(BaseModel):
     id: str
@@ -376,7 +381,16 @@ async def cancel_job(job_id: str):
         return {"status": "already_finished"}
 
     success = state.cancel_job(job_id)
-    return {"status": "cancelling" if success else "failed"}
+    return {"success": success}
+
+
+@app.get("/api/jobs/{job_id}")
+async def get_job_status(job_id: str):
+    """Get job status and logs."""
+    if job_id not in state.jobs:
+        return {"error": "Job not found"}, 404
+    
+    return state.jobs[job_id]
 
 
 @app.get("/api/jobs")

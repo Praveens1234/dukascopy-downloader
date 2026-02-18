@@ -1,24 +1,26 @@
 # Dukascopy Historical Data Downloader
 
-A production-ready tool to download high-quality historical tick and candle data from Dukascopy. Features both a robust **Command Line Interface (CLI)** for automation and a modern **Web UI** for ease of use.
+A high-performance, production-ready tool to download high-quality historical tick and candle data from Dukascopy.
+Engineered for reliability, speed, and data integrity.
 
 ![Web UI](https://via.placeholder.com/800x450.png?text=Web+UI+Preview)
 
-## 🚀 Features
+## 🚀 Key Features
 
-- **Dual Interface**: Choice of CLI for scripts/power users or Web UI for visual management.
-- **Robust Downloading**:
-  - **Anti-Rate-Limiting**: Browser emulation, exponential backoff, and request staggering to avoid 503 errors.
-  - **Resumable**: Saves progress every 5 days; automatically resumes interrupted downloads.
-  - **Correctness**: Validates data continuity, handles weekends/holidays, and normalizes prices.
-- **Web UI**:
-  - **Responsive Design**: Works perfectly on Desktop and Mobile.
-  - **Live Monitoring**: Real-time progress bars and streaming terminal logs.
-  - **Job Management**: Start, monitor, and cancel downloads.
-  - **File Manager**: Browse, download, and delete exported CSV files.
-- **CLI**:
-  - **Batch Processing**: Download multiple symbols and year ranges in one go.
-  - **Flexible Output**: Tick data or aggregated candles (M1, H1, D1, etc.).
+### 🛡️ Robust & Resilient
+-   **Streaming Architecture**: Processes data chunk-by-chunk using a Map-Reduce approach. Can handle 10+ years of tick data without OOM crashes (constant low memory footprint).
+-   **Smart Resume**: Tracks progress daily. If interrupted, resumes exactly where it left off.
+-   **Holiday Awareness**: Automatically skips global market holidays (Jan 1, Dec 25) to save time and bandwidth.
+-   **Circuit Breaker**: Detects repeated `503 Service Unavailable` errors and automatically backs off for 60s to avoid IP bans.
+
+### 🎯 Accurate Data
+-   **Midnight Crossing Fix**: Correctly aggregates candles that span across daily boundaries (e.g., `4H`, `7H`) using a sophisticated merging algorithm.
+-   **Strict Validation**: Checks for gaps, duplicates, zero-prices, and OHLC consistency.
+-   **Precision**: Uses decimal-correct rounding to prevent floating-point drift.
+
+### ⚡ Performance
+-   **Async I/O**: Uses `aiohttp` with connection pooling, DNS caching, and exponential backoff.
+-   **Parallel Downloads**: Multi-threaded downloading of days, fully configurable.
 
 ## 🛠️ Installation
 
@@ -35,79 +37,63 @@ A production-ready tool to download high-quality historical tick and candle data
 
 ## 🖥️ Web UI Usage
 
-The Web UI is the easiest way to use the downloader.
-
 1.  **Start the Server**:
     ```bash
     python server.py
     ```
-    *   The browser will open automatically at `http://localhost:8000`.
-    *   **Mobile Access**: The terminal will display a network URL (e.g., `http://192.168.1.5:8000`). Open this on your phone while on the same WiFi.
+    *   Open `http://localhost:8000`.
+    *   **Mobile**: Access via the LAN IP displayed in the terminal.
 
-2.  **Start a Download**:
-    *   Go to **New Download**.
-    *   Select **Symbols** (click chips or type custom ones like `BTCUSD`).
-    *   Choose **Date Range** and **Timeframe** (Tick, M1, H1, etc.).
-    *   Adjust **Threads** slider (default 5 is safe).
-    *   Click **Start Download**.
-
-3.  **Monitor & Manage**:
-    *   Watch progress in the active panel.
-    *   View detailed logs in the **Terminal** tab.
-    *   Click **Stop 🛑** to cancel a running job.
-    *   Go to **Files** tab to download your CSVs.
+2.  **Features**:
+    *   **Live Logs**: Real-time streaming logs via WebSockets.
+    *   **Progress Tracking**: Visual progress bars.
+    *   **File Manager**: Download/Delete generated CSVs directly.
 
 ## 💻 CLI Usage
 
-For automation or headless environments.
+For automation or headless servers.
 
-**Basic Download**:
 ```bash
-python cli.py EURUSD -s 2023-01-01 -e 2023-12-31 -t M1
-```
+# Basic Download (Tick Data)
+python cli.py EURUSD -s 2023-01-01 -e 2023-01-31
 
-**Multiple Symbols & Timeframes**:
-```bash
-python cli.py EURUSD GBPUSD XAUUSD -s 2024-01-01 -e 2024-06-01 -t H1
-```
+# Candle Download (1 Minute)
+python cli.py GBPUSD -s 2023-01-01 -e 2023-12-31 -t M1
 
-**Resume an Interrupted Download**:
-```bash
+# Custom Timeframe (e.g., 2 Hours)
+python cli.py XAUUSD -s 2023-01-01 -e 2023-06-01 -t CUSTOM --custom-tf 2h
+
+# Resume Interrupted Download
 python cli.py EURUSD -s 2020-01-01 -e 2024-01-01 --resume
 ```
 
 **Options**:
 - `-s, --start`: Start date (YYYY-MM-DD).
 - `-e, --end`: End date (YYYY-MM-DD).
-- `-t, --timeframe`: `TICK` (default), `M1`, `M5`, `M15`, `M30`, `H1`, `H4`, `D1`.
-- `--threads`: Number of download threads (default: 5).
-- `--resume`: Resume from last saved state.
-- `--help`: Show all options.
+- `-t, --timeframe`: `TICK` (default), `M1`, `H1`, `D1`, `CUSTOM`.
+- `--custom-tf`: Seconds (`120`) or suffix (`10s`, `2h`).
+- `--threads`: Parallel threads (default 5).
+- `--source`: `auto` (default), `native` (fastest for M1/H1/D1), `tick` (most accurate).
 
-## 📂 Output
+## 🧪 Testing
 
-Files are saved to the `data/` directory in CSV format:
-`{SYMBOL}_{TIMEFRAME}_{START}_{END}.csv`
+The project includes a comprehensive test suite using `pytest`.
 
-**Format (Candles)**:
-`timestamp,open,high,low,close,volume`
+```bash
+# Run all tests
+pytest
 
-**Format (Ticks)**:
-`timestamp,ask,bid,ask_vol,bid_vol`
+# Run end-to-end system tests
+pytest tests/e2e_cli.py tests/e2e_server.py
+```
 
 ## ⚙️ Configuration
 
-Settings can be tweaked in `config/settings.py` if needed (e.g., modifying retry delays or concurrency limits), but the defaults are tuned for stability.
-
-## ❓ Troubleshooting
-
-*   **Server won't start?**
-    *   It tries port 8000. If busy, it will try 8001, etc. Check the terminal output.
-*   **Mobile can't connect?**
-    *   Ensure phone and PC are on the same WiFi.
-    *   Check if Windows Firewall is blocking Python. Allow access to private networks.
-*   **Download stuck/slow?**
-    *   Dukascopy limits download speed. We use 5 threads to be polite. Increasing threads >10 may cause blocking (HTTP 503).
+Defaults can be tweaked in `config/settings.py`.
+Key settings:
+-   `HOURLY_CONCURRENCY`: Max async requests per day (default 8).
+-   `DOWNLOAD_ATTEMPTS`: Max retries per file (default 10).
+-   `HTTP_TIMEOUT`: Request timeout (default 60s).
 
 ## 📄 License
 MIT License

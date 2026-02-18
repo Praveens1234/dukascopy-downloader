@@ -1,6 +1,6 @@
 """
 Candle (OHLC) class for aggregating tick data into candlesticks.
-Matches duka repo's candle.py pattern.
+Ensures strict rounding to 5 decimal places for prices and 2 for volume.
 """
 
 from datetime import datetime
@@ -20,16 +20,17 @@ class Candle:
         self.symbol = symbol
         self.timestamp = timestamp
         self.timeframe = timeframe
+
         if sorted_values:
-            self.open_price = sorted_values[0]
-            self.close_price = sorted_values[-1]
-            self.high = max(sorted_values)
-            self.low = min(sorted_values)
+            self.open_price = round(sorted_values[0], 5)
+            self.close_price = round(sorted_values[-1], 5)
+            self.high = round(max(sorted_values), 5)
+            self.low = round(min(sorted_values), 5)
         else:
-            self.open_price = 0
-            self.close_price = 0
-            self.high = 0
-            self.low = 0
+            self.open_price = 0.0
+            self.close_price = 0.0
+            self.high = 0.0
+            self.low = 0.0
 
     def __str__(self):
         dt = datetime.utcfromtimestamp(self.timestamp)

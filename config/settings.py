@@ -1,7 +1,10 @@
 """
 Dukascopy Downloader - Configuration Settings
 Production-ready settings with anti-rate-limiting measures.
+Reads overrides from environment variables.
 """
+
+import os
 
 # =============================================================================
 # URL Templates
@@ -11,19 +14,16 @@ URL_TEMPLATE = (
     "{currency}/{year}/{month:02d}/{day:02d}/{hour:02d}h_ticks.bi5"
 )
 
-# Native candle URL templates (Dukascopy serves pre-computed OHLC for M1, H1, D1)
-# Month is 0-indexed in Dukascopy URLs (00=Jan, 11=Dec)
 CANDLE_URL_TEMPLATES = {
     'M1': "https://www.dukascopy.com/datafeed/{currency}/{year}/{month:02d}/{day:02d}/{price_type}_candles_min_1.bi5",
     'H1': "https://www.dukascopy.com/datafeed/{currency}/{year}/{month:02d}/{price_type}_candles_hour_1.bi5",
     'D1': "https://www.dukascopy.com/datafeed/{currency}/{year}/{price_type}_candles_day_1.bi5",
 }
 
-# Timeframes that have native candle data on Dukascopy
 NATIVE_CANDLE_TIMEFRAMES = {'M1', 'H1', 'D1'}
 
 # =============================================================================
-# HTTP Headers (browser-like to avoid 503 blocks)
+# HTTP Headers
 # =============================================================================
 HTTP_HEADERS = {
     "User-Agent": (
@@ -39,16 +39,16 @@ HTTP_HEADERS = {
 }
 
 # =============================================================================
-# Download Settings
+# Download Settings (Env Vars override)
 # =============================================================================
-DEFAULT_THREADS = 5          # Conservative default to avoid 503s
-MAX_THREADS = 30
-DOWNLOAD_ATTEMPTS = 10       # More retries for production reliability
-RETRY_BASE_DELAY = 1.0       # Base delay in seconds
-RETRY_MAX_DELAY = 30.0       # Maximum delay between retries
-HOURLY_CONCURRENCY = 8       # Max concurrent hourly downloads per day (not all 24 at once)
-REQUEST_DELAY = 0.1          # Small delay (seconds) between starting each request
-HTTP_TIMEOUT = 60             # Timeout per request in seconds
+DEFAULT_THREADS = int(os.getenv("DEFAULT_THREADS", 5))
+MAX_THREADS = int(os.getenv("MAX_THREADS", 30))
+DOWNLOAD_ATTEMPTS = int(os.getenv("DOWNLOAD_ATTEMPTS", 10))
+RETRY_BASE_DELAY = float(os.getenv("RETRY_BASE_DELAY", 1.0))
+RETRY_MAX_DELAY = float(os.getenv("RETRY_MAX_DELAY", 30.0))
+HOURLY_CONCURRENCY = int(os.getenv("HOURLY_CONCURRENCY", 8))
+REQUEST_DELAY = float(os.getenv("REQUEST_DELAY", 0.1))
+HTTP_TIMEOUT = float(os.getenv("HTTP_TIMEOUT", 60))
 
 # =============================================================================
 # Timeframes (in seconds)
@@ -89,14 +89,20 @@ def resolve_custom_timeframe(value_str):
     Raises:
         ValueError: if format is invalid or value <= 0
     """
+    if not value_str:
+        return 0
+
     value_str = value_str.strip().lower()
     multipliers = {'s': 1, 'm': 60, 'h': 3600, 'd': 86400}
 
-    if value_str[-1] in multipliers:
-        num = int(value_str[:-1])
-        result = num * multipliers[value_str[-1]]
-    else:
-        result = int(value_str)
+    try:
+        if value_str[-1] in multipliers:
+            num = int(value_str[:-1])
+            result = num * multipliers[value_str[-1]]
+        else:
+            result = int(value_str)
+    except ValueError:
+        raise ValueError(f"Invalid timeframe format: {value_str}")
 
     if result <= 0:
         raise ValueError(f"Timeframe must be positive, got {result}")
@@ -145,7 +151,7 @@ DEFAULT_POINT_VALUE = 100000
 VOLUME_MULTIPLIER = 1_000_000
 
 # =============================================================================
-# Symbols
+# Symbols (Reference only, service validates regex)
 # =============================================================================
 SYMBOLS = [
     'EURUSD', 'GBPUSD', 'USDJPY', 'USDCHF',

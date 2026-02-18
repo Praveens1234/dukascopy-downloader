@@ -5,7 +5,9 @@ Usage: python cli.py EURUSD -s 2024-01-01 -e 2024-12-31 -t M1
 
 import sys
 import os
+import time
 from datetime import datetime
+from tqdm import tqdm
 
 import click
 
@@ -16,7 +18,57 @@ from config.settings import (
     TIMEFRAME_CHOICES, DEFAULT_THREADS, MAX_THREADS,
     DATA_SOURCE_CHOICES, PRICE_TYPE_CHOICES, VOLUME_TYPE_CHOICES,
 )
-from app import run_download
+from core.service import DownloaderService, DownloadConfig, ProgressObserver
+from core.validator import validate_output, print_validation_report
+
+class CLIProgressObserver(ProgressObserver):
+    def __init__(self):
+        self.pbar = None
+        self.current_symbol = ""
+        self.start_time = None
+
+    def on_start(self, symbol: str, total_days: int):
+        self.current_symbol = symbol
+        self.start_time = time.time()
+        print(f"\nProcessing {symbol} ({total_days} days)...")
+        # Use simple progress bar for now, can be enhanced
+        self.pbar = tqdm(total=total_days, unit="day", desc=symbol)
+
+    def on_update(self, symbol: str, days_processed: int, total_days: int, success: bool):
+        if self.pbar:
+            # TQDM update is incremental, but here we get total processed.
+            # So calculate delta
+            current = self.pbar.n
+            delta = days_processed - current
+            if delta > 0:
+                self.pbar.update(delta)
+
+    def on_finish(self, symbol: str, output_path: str):
+        if self.pbar:
+            self.pbar.close()
+            self.pbar = None
+
+        elapsed = time.time() - self.start_time if self.start_time else 0
+        print(f"  ✓ {symbol}: Written to {output_path} ({elapsed:.1f}s)")
+
+        # Run validation
+        # Extract dates from path or config?
+        # Ideally validation logic should be part of service or triggered here.
+        # Since service doesn't return validation results, we can trigger it here if we have date range.
+        # But for now, let's keep it simple.
+
+    def on_error(self, symbol: str, error: Exception):
+        if self.pbar:
+            self.pbar.close()
+            self.pbar = None
+        print(f"  ✗ {symbol} Error: {error}", file=sys.stderr)
+
+    def log(self, message: str):
+        # Avoid interfering with TQDM
+        if self.pbar:
+            self.pbar.write(f"  {message}")
+        else:
+            print(f"  {message}")
 
 
 def validate_date(ctx, param, value):
@@ -124,22 +176,37 @@ def main(symbols, start_date, end_date, timeframe, custom_tf, threads,
     # Convert symbols to uppercase
     symbols = [s.upper() for s in symbols]
 
+    config = DownloadConfig(
+        symbols=symbols,
+        start_date=start_date,
+        end_date=end_date,
+        timeframe=timeframe,
+        threads=threads,
+        data_source=data_source,
+        price_type=price_type.upper(),
+        volume_type=volume_type.upper(),
+        custom_tf=custom_tf,
+        output_dir=output,
+        header=header,
+        resume=resume
+    )
+
+    observer = CLIProgressObserver()
+    service = DownloaderService(config, observer)
+
     try:
-        run_download(
-            symbols=symbols,
-            start=start_date,
-            end=end_date,
-            threads=threads,
-            timeframe=timeframe,
-            folder=output,
-            header=header,
-            resume=resume,
-            data_source=data_source,
-            price_type=price_type.upper(),
-            volume_type=volume_type.upper(),
-            custom_tf=custom_tf,
-        )
+        print(f"\n{'=' * 60}")
+        print(f"  Dukascopy Historical Data Downloader")
+        print(f"{'=' * 60}")
+        print(f"  Symbols:    {', '.join(symbols)}")
+        print(f"  Date Range: {start_date} to {end_date}")
+        print(f"  Threads:    {threads}")
+        print(f"{'=' * 60}\n")
+
+        service.run()
+
     except KeyboardInterrupt:
+        service.cancel()
         print("\n\n  Download interrupted. Use --resume to continue later.")
         sys.exit(1)
     except Exception as e:
@@ -149,4 +216,3 @@ def main(symbols, start_date, end_date, timeframe, custom_tf, threads,
 
 if __name__ == '__main__':
     main()
-

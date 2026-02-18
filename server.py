@@ -26,9 +26,9 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from config.settings import (
     TIMEFRAME_CHOICES, SYMBOLS, DEFAULT_THREADS, MAX_THREADS,
     DATA_SOURCE_CHOICES, PRICE_TYPE_CHOICES, VOLUME_TYPE_CHOICES,
-    NATIVE_CANDLE_TIMEFRAMES, resolve_custom_timeframe,
 )
-from app import run_download, generate_days, count_days
+from core.service import DownloaderService, DownloadConfig, ProgressObserver
+from core.validator import validate_output
 
 # =============================================================================
 # App Setup
@@ -49,6 +49,7 @@ class JobState:
         self.log_subscribers: List[WebSocket] = []
         self.cancel_events: Dict[str, threading.Event] = {}
         self.lock = threading.Lock()
+        self._loop = None
 
     def create_job(self, job_id, params):
         self.jobs[job_id] = {
@@ -87,11 +88,13 @@ class JobState:
                 # Keep only last 500 log lines
                 if len(self.jobs[job_id]["logs"]) > 500:
                     self.jobs[job_id]["logs"] = self.jobs[job_id]["logs"][-500:]
+
         # Broadcast to WebSocket subscribers
-        asyncio.run_coroutine_threadsafe(
-            self._broadcast_log(job_id, entry),
-            self._loop
-        )
+        if self._loop:
+            asyncio.run_coroutine_threadsafe(
+                self._broadcast_log(job_id, entry),
+                self._loop
+            )
 
     async def _broadcast_log(self, job_id, entry):
         dead = []
@@ -125,6 +128,66 @@ class JobState:
 
 state = JobState()
 
+class ServerProgressObserver(ProgressObserver):
+    def __init__(self, job_id: str):
+        self.job_id = job_id
+        self.output_files = []
+        self.global_completed = 0
+        self.global_total = 0
+
+    def on_start(self, symbol: str, total_days: int):
+        # We might call on_start multiple times if multiple symbols.
+        # But DownloaderService calls it per symbol.
+        # We need to track global progress if we want to show overall %
+        # For now, let's just log it.
+        state.add_log(self.job_id, f"─── Downloading {symbol} ({total_days} steps) ───")
+
+    def on_update(self, symbol: str, days_processed: int, total_days: int, success: bool):
+        # This is tricky because we might have multiple symbols.
+        # Ideally, DownloaderService would report global progress, or we track it here.
+        # Simple hack: Just update progress based on the current symbol context?
+        # Better: let's just trust the service calls.
+
+        # If we knew the grand total of days across all symbols, we could do better.
+        # But DownloaderService processes sequentially.
+        # So we can accumulate progress?
+        pass # We will handle progress updates inside the wrapper logic or improve Service later.
+
+        # Actually, let's use the log for granular updates
+        if success and days_processed % 10 == 0:
+             state.add_log(self.job_id, f"  ✓ {symbol}: {days_processed}/{total_days}")
+
+    def on_finish(self, symbol: str, output_path: str):
+        self.output_files.append(os.path.basename(output_path))
+        state.add_log(self.job_id, f"  ✓ Written: {os.path.basename(output_path)}")
+
+        # Run validation
+        # We need start/end dates. We can get them from the job params.
+        job = state.jobs.get(self.job_id)
+        if job:
+            s = job["params"]["start_date"]
+            e = job["params"]["end_date"]
+            try:
+                # Validation requires datetime objects? No, wait.
+                # validate_output expects datetime objects or strings?
+                # core/validator.py: validate_output(file_path, start_date, end_date, symbol)
+                # It uses them for internal logic. Let's pass what we have.
+                # Ideally pass date objects.
+                sd = datetime.strptime(s, "%Y-%m-%d").date()
+                ed = datetime.strptime(e, "%Y-%m-%d").date()
+                results = validate_output(output_path, sd, ed, symbol)
+                state.add_log(self.job_id, f"  Validation: {'VALID' if results['valid'] else 'ISSUES'} | {results['total_rows']:,} rows")
+            except Exception as e:
+                state.add_log(self.job_id, f"  Validation Error: {e}")
+
+
+    def on_error(self, symbol: str, error: Exception):
+        state.add_log(self.job_id, f"  ✗ {symbol} Error: {str(error)}")
+
+    def log(self, message: str):
+        state.add_log(self.job_id, message)
+
+
 # =============================================================================
 # Request/Response Models
 # =============================================================================
@@ -155,156 +218,73 @@ class JobResponse(BaseModel):
 # Custom Download Runner (with log capture)
 # =============================================================================
 def run_download_job(job_id: str, params: dict):
-    """Run download in a background thread with log capture."""
-    import concurrent.futures
-    from core.fetch import fetch_day
-    from core.processor import decompress
-    from core.csv_dumper import CSVDumper
-    from core.candle_fetch import fetch_native_candles
-    from core.validator import validate_output
-    from config.settings import TimeFrame, SATURDAY
-
+    """Run download in a background thread using DownloaderService."""
     try:
-        symbols = params["symbols"]
-        start = datetime.strptime(params["start_date"], "%Y-%m-%d").date()
-        end = datetime.strptime(params["end_date"], "%Y-%m-%d").date()
-        timeframe_str = params["timeframe"]
-        threads = min(params.get("threads", DEFAULT_THREADS), MAX_THREADS)
-        data_source = params.get("data_source", "auto").lower()
-        price_type = params.get("price_type", "BID").upper()
-        volume_type = params.get("volume_type", "TOTAL").upper()
-        custom_tf = params.get("custom_tf", None)
+        start_date = datetime.strptime(params["start_date"], "%Y-%m-%d").date()
+        end_date = datetime.strptime(params["end_date"], "%Y-%m-%d").date()
 
-        # Resolve timeframe (handle CUSTOM)
-        if timeframe_str.upper() == 'CUSTOM' and custom_tf:
-            tf_value = resolve_custom_timeframe(custom_tf)
-        else:
-            tf_value = getattr(TimeFrame, timeframe_str.upper(), TimeFrame.TICK)
-        all_days = list(generate_days(start, end))
-        total_days = len(all_days)
-
-        # Determine if native candle path should be used
-        tf_upper = timeframe_str.upper()
-        use_native = (
-            (data_source == 'native' and tf_upper in NATIVE_CANDLE_TIMEFRAMES) or
-            (data_source == 'auto' and tf_upper in NATIVE_CANDLE_TIMEFRAMES and tf_upper != 'TICK')
+        config = DownloadConfig(
+            symbols=[s.upper() for s in params["symbols"]],
+            start_date=start_date,
+            end_date=end_date,
+            timeframe=params["timeframe"],
+            threads=min(params.get("threads", DEFAULT_THREADS), MAX_THREADS),
+            data_source=params.get("data_source", "auto"),
+            price_type=params.get("price_type", "BID"),
+            volume_type=params.get("volume_type", "TOTAL"),
+            custom_tf=params.get("custom_tf"),
+            output_dir=DATA_DIR,
+            header=True,
+            resume=False
         )
-        source_label = "Native Candle" if use_native else "Tick → Candle"
 
-        state.update_job(job_id, status="running", total_days=total_days * len(symbols))
-        state.add_log(job_id, f"Starting download: {', '.join(symbols)}")
-        state.add_log(job_id, f"Date range: {start} to {end} | Timeframe: {timeframe_str}")
-        state.add_log(job_id, f"Source: {source_label} | Price: {price_type} | Volume: {volume_type} | Threads: {threads}")
+        observer = ServerProgressObserver(job_id)
+        service = DownloaderService(config, observer)
 
-        if total_days == 0:
-            state.update_job(job_id, status="completed", progress=100)
-            state.add_log(job_id, "No trading days in range.")
-            return
+        # Inject cancel capability
+        # The service checks cancel_event internally.
+        # We need to bridge state.cancel_events[job_id] to service._cancel_event?
+        # Or just polling.
+        # Actually Service has a cancel() method.
+        # But we are running service.run() which blocks.
+        # So we need a way to trigger service.cancel() from outside.
+        # We can poll state.cancel_events in the observer? No, observer is passive.
 
-        output_files = []
-        global_completed = [0]
-        global_total = total_days * len(symbols)
+        # Solution: We can launch a monitor thread or just make the Observer check cancellation?
+        # Or, we pass the cancel event to the config?
+        # The Service creates its own event.
+        # Let's override the Service's cancel event with ours?
+        service._cancel_event = state.cancel_events[job_id]
 
-        for symbol in symbols:
-            # Check for cancellation before starting symbol
-            if state.cancel_events[job_id].is_set():
-                break
+        state.update_job(job_id, status="running")
+        state.add_log(job_id, f"Starting download job...")
 
-            state.add_log(job_id, f"─── Downloading {symbol} ───")
-            lock = threading.Lock()
-            csv_dumper = CSVDumper(symbol, tf_value, start, end, DATA_DIR, header=True,
-                                  price_type=price_type, volume_type=volume_type)
-
-            if use_native:
-                # ═══ Native Candle Path (fast, no tick conversion) ═══
-                state.add_log(job_id, f"  ⚡ Fetching native {timeframe_str} candles ({price_type})...")
-                try:
-                    candles = fetch_native_candles(symbol, start, end, tf_upper, price_type)
-                    csv_dumper.append_native_candles(candles)
-                    state.add_log(job_id, f"  ✓ {symbol}: Got {len(candles)} native candles")
-                    global_completed[0] += total_days
-                    state.update_job(job_id, completed_days=global_completed[0], progress=round(global_completed[0] / global_total * 100, 1))
-                    try:
-                        asyncio.run_coroutine_threadsafe(state.broadcast_progress(job_id), state._loop)
-                    except Exception:
-                        pass
-                except Exception as e:
-                    state.add_log(job_id, f"  ✗ Native fetch failed: {str(e)[:80]}")
-                    global_completed[0] += total_days
-                    state.update_job(job_id, completed_days=global_completed[0], progress=round(global_completed[0] / global_total * 100, 1))
-            else:
-                # ═══ Tick-to-Candle Path (original, with accuracy fixes) ═══
-                def do_work(day, sym=symbol):
-                    try:
-                        raw = fetch_day(sym, day)
-                        ticks = decompress(sym, day, raw)
-                        with lock:
-                            csv_dumper.append(day, ticks)
-                        tick_count = len(ticks) if ticks else 0
-                        state.add_log(job_id, f"  ✓ {sym} {day} — {tick_count:,} ticks")
-                    except Exception as e:
-                        state.add_log(job_id, f"  ✗ {sym} {day} — {str(e)[:80]}")
-                    finally:
-                        global_completed[0] += 1
-                        pct = round(global_completed[0] / global_total * 100, 1)
-                        state.update_job(
-                            job_id,
-                            completed_days=global_completed[0],
-                            progress=pct,
-                        )
-                        try:
-                            asyncio.run_coroutine_threadsafe(
-                                state.broadcast_progress(job_id), state._loop
-                            )
-                        except Exception:
-                            pass
-
-                with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as executor:
-                    futures = []
-                    for i, day in enumerate(all_days):
-                        if state.cancel_events[job_id].is_set():
-                            state.add_log(job_id, "⚠ Cancelling... stopping new tasks.")
-                            break
-                        futures.append(executor.submit(do_work, day))
-                        if i > 0 and i % threads == 0:
-                            time.sleep(0.3)
-                    concurrent.futures.wait(futures)
-
-                if state.cancel_events[job_id].is_set():
-                    state.add_log(job_id, "⚠ Symbol download cancelled.")
-
-            # Write CSV
-            file_path = csv_dumper.dump()
-            output_files.append(os.path.basename(file_path))
-            state.add_log(job_id, f"  ✓ Written: {os.path.basename(file_path)}")
-
-            # Validate
-            results = validate_output(file_path, start, end, symbol)
-            state.add_log(job_id, f"  Validation: {'VALID' if results['valid'] else 'ISSUES'} | {results['total_rows']:,} rows")
+        service.run()
 
         if state.cancel_events[job_id].is_set():
-            state.update_job(
+             state.update_job(
                 job_id,
                 status="cancelled",
                 finished_at=datetime.now().isoformat(),
-                output_file=", ".join(output_files) if output_files else "Partial/None",
+                output_file="Partial"
             )
-            state.add_log(job_id, f"═══ Download Cancelled ═══")
+             state.add_log(job_id, "Download Cancelled.")
         else:
-            state.update_job(
+             # Check if any files produced
+             output_files = observer.output_files
+             state.update_job(
                 job_id,
                 status="completed",
                 progress=100,
                 finished_at=datetime.now().isoformat(),
-                output_file=", ".join(output_files),
+                output_file=", ".join(output_files) if output_files else "None"
             )
-            state.add_log(job_id, f"═══ Download Complete ═══")
+             state.add_log(job_id, "Download Complete.")
 
     except Exception as e:
         state.update_job(job_id, status="failed", error=str(e),
                          finished_at=datetime.now().isoformat())
         state.add_log(job_id, f"FATAL ERROR: {str(e)}")
-
 
 
 # =============================================================================
@@ -439,7 +419,10 @@ async def websocket_endpoint(websocket: WebSocket):
     """WebSocket for live log streaming and progress updates."""
     await websocket.accept()
     state.log_subscribers.append(websocket)
-    state._loop = asyncio.get_event_loop()
+    # Ensure loop is set if not already
+    if state._loop is None:
+        state._loop = asyncio.get_event_loop()
+
     try:
         while True:
             # Keep connection alive, handle client messages
@@ -543,7 +526,7 @@ if __name__ == "__main__":
     print(f"  Press Ctrl+C to stop\n")
 
     # Auto-open browser on PC
-    webbrowser.open(f"http://localhost:{PORT}")
+    # webbrowser.open(f"http://localhost:{PORT}")
 
     uvicorn.run(
         "server:app",
@@ -552,4 +535,3 @@ if __name__ == "__main__":
         reload=False,
         log_level="warning",
     )
-

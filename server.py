@@ -132,47 +132,42 @@ class ServerProgressObserver(ProgressObserver):
     def __init__(self, job_id: str):
         self.job_id = job_id
         self.output_files = []
-        self.global_completed = 0
-        self.global_total = 0
+        self.history = []  # List of (done, total) for finished symbols
+        self.current_symbol_done = 0
+        self.current_symbol_total = 0
 
     def on_start(self, symbol: str, total_days: int):
-        # We might call on_start multiple times if multiple symbols.
-        # But DownloaderService calls it per symbol.
-        # We need to track global progress if we want to show overall %
-        # For now, let's just log it.
+        self.current_symbol_total = total_days
+        self.current_symbol_done = 0
         state.add_log(self.job_id, f"─── Downloading {symbol} ({total_days} steps) ───")
+        self._update_progress()
 
     def on_update(self, symbol: str, days_processed: int, total_days: int, success: bool):
-        # This is tricky because we might have multiple symbols.
-        # Ideally, DownloaderService would report global progress, or we track it here.
-        # Simple hack: Just update progress based on the current symbol context?
-        # Better: let's just trust the service calls.
+        self.current_symbol_done = days_processed
+        self.current_symbol_total = total_days
+        self._update_progress()
 
-        # If we knew the grand total of days across all symbols, we could do better.
-        # But DownloaderService processes sequentially.
-        # So we can accumulate progress?
-        pass # We will handle progress updates inside the wrapper logic or improve Service later.
-
-        # Actually, let's use the log for granular updates
-        if success and days_processed % 10 == 0:
+        if success and days_processed > 0 and days_processed % 10 == 0:
              state.add_log(self.job_id, f"  ✓ {symbol}: {days_processed}/{total_days}")
 
     def on_finish(self, symbol: str, output_path: str):
+        # Lock in the progress for this symbol
+        self.history.append((self.current_symbol_done, self.current_symbol_total))
+        self.current_symbol_done = 0
+        self.current_symbol_total = 0
+
         self.output_files.append(os.path.basename(output_path))
         state.add_log(self.job_id, f"  ✓ Written: {os.path.basename(output_path)}")
 
-        # Run validation
-        # We need start/end dates. We can get them from the job params.
+        self._validate_file(output_path, symbol)
+        self._update_progress()
+
+    def _validate_file(self, output_path, symbol):
         job = state.jobs.get(self.job_id)
         if job:
             s = job["params"]["start_date"]
             e = job["params"]["end_date"]
             try:
-                # Validation requires datetime objects? No, wait.
-                # validate_output expects datetime objects or strings?
-                # core/validator.py: validate_output(file_path, start_date, end_date, symbol)
-                # It uses them for internal logic. Let's pass what we have.
-                # Ideally pass date objects.
                 sd = datetime.strptime(s, "%Y-%m-%d").date()
                 ed = datetime.strptime(e, "%Y-%m-%d").date()
                 results = validate_output(output_path, sd, ed, symbol)
@@ -180,6 +175,26 @@ class ServerProgressObserver(ProgressObserver):
             except Exception as e:
                 state.add_log(self.job_id, f"  Validation Error: {e}")
 
+    def _update_progress(self):
+        done_so_far = sum(x[0] for x in self.history) + self.current_symbol_done
+        total_so_far = sum(x[1] for x in self.history) + self.current_symbol_total
+
+        pct = (done_so_far / total_so_far * 100) if total_so_far > 0 else 0
+        pct = round(pct, 1)
+
+        state.update_job(
+            self.job_id,
+            progress=pct,
+            completed_days=done_so_far,
+            total_days=total_so_far
+        )
+
+        # Broadcast via WebSocket
+        if state._loop:
+            asyncio.run_coroutine_threadsafe(
+                state.broadcast_progress(self.job_id),
+                state._loop
+            )
 
     def on_error(self, symbol: str, error: Exception):
         state.add_log(self.job_id, f"  ✗ {symbol} Error: {str(error)}")
@@ -241,19 +256,6 @@ def run_download_job(job_id: str, params: dict):
         observer = ServerProgressObserver(job_id)
         service = DownloaderService(config, observer)
 
-        # Inject cancel capability
-        # The service checks cancel_event internally.
-        # We need to bridge state.cancel_events[job_id] to service._cancel_event?
-        # Or just polling.
-        # Actually Service has a cancel() method.
-        # But we are running service.run() which blocks.
-        # So we need a way to trigger service.cancel() from outside.
-        # We can poll state.cancel_events in the observer? No, observer is passive.
-
-        # Solution: We can launch a monitor thread or just make the Observer check cancellation?
-        # Or, we pass the cancel event to the config?
-        # The Service creates its own event.
-        # Let's override the Service's cancel event with ours?
         service._cancel_event = state.cancel_events[job_id]
 
         state.update_job(job_id, status="running")

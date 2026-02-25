@@ -102,3 +102,4 @@ mobile_app/android/app/src/debug/AndroidManifest.xml
 mobile_app/android/app/src/main/res/mipmap-xhdpi/ic_launcher.png
 mobile_app/android/app/src/main/res/mipmap-xxhdpi/ic_launcher.png
 mobile_app/android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png
+mobile_app/build/app/outputs/flutter-apk/*-release.apk

@@ -40,6 +40,18 @@ from app import run_download, generate_days, count_days
 # =============================================================================
 app = FastAPI(title="Dukascopy Downloader", version="1.0.0")
 
+# Get local network IP for mobile access
+def get_local_ip():
+    import socket
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception:
+        return "127.0.0.1"
+
 DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 
@@ -347,6 +359,19 @@ async def get_config():
     }
 
 
+@app.get("/api/connection_info")
+async def get_connection_info(request: Request):
+    """Return connection info for mobile app."""
+    # Try to determine the port from the request
+    port = request.url.port or 8000
+    local_ip = get_local_ip()
+    return {
+        "ip": local_ip,
+        "port": port,
+        "url": f"http://{local_ip}:{port}"
+    }
+
+
 @app.post("/api/download")
 async def start_download(req: DownloadRequest):
     """Start a new download job."""
@@ -503,17 +528,6 @@ if __name__ == "__main__":
 
     PORT = 8000
     HOST = "0.0.0.0"  # Bind to ALL interfaces so mobile devices can connect
-
-    # Get local network IP for mobile access
-    def get_local_ip():
-        try:
-            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            s.connect(("8.8.8.8", 80))
-            ip = s.getsockname()[0]
-            s.close()
-            return ip
-        except Exception:
-            return "127.0.0.1"
 
     LOCAL_IP = get_local_ip()
 

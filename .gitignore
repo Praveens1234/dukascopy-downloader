@@ -42,3 +42,9 @@ logs/
 # OS
 .DS_Store
 Thumbs.db
+mobile_app/build/
+mobile_app/.dart_tool/
+mobile_app/.idea/
+mobile_app/android/.gradle/
+mobile_app/ios/.symlinks/
+mobile_app/ios/Pods/

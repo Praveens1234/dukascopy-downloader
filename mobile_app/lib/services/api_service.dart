@@ -5,109 +5,86 @@ import '../models/job.dart';
 import '../models/download_request.dart';
 
 class ApiService {
-  String? _baseUrl;
-  static const String _baseUrlKey = 'base_url';
-
-  // Get current base URL or load from prefs
-  Future<String?> getBaseUrl() async {
-    if (_baseUrl != null) return _baseUrl;
+  Future<String> get _baseUrl async {
     final prefs = await SharedPreferences.getInstance();
-    _baseUrl = prefs.getString(_baseUrlKey);
-    return _baseUrl;
-  }
-
-  // Set new base URL and save to prefs
-  Future<void> setBaseUrl(String url) async {
-    // Ensure no trailing slash
-    if (url.endsWith('/')) {
-      url = url.substring(0, url.length - 1);
+    final url = prefs.getString('server_url');
+    if (url == null || url.isEmpty) {
+      throw Exception('Server URL not set. Please connect first.');
     }
-    _baseUrl = url;
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_baseUrlKey, url);
+    return url;
   }
 
-  // Generic GET helper
-  Future<dynamic> _get(String endpoint) async {
-    final baseUrl = await getBaseUrl();
-    if (baseUrl == null) throw Exception("Server URL not configured");
-
-    try {
-      final response = await http.get(Uri.parse('$baseUrl$endpoint'));
-      if (response.statusCode == 200) {
-        return json.decode(response.body);
-      } else {
-        throw Exception('Server error: ${response.statusCode}');
-      }
-    } catch (e) {
-      throw Exception('Connection failed: $e');
+  Future<Map<String, dynamic>> checkConnection(String url) async {
+    final res = await http.get(Uri.parse('$url/api/status')).timeout(const Duration(seconds: 5));
+    if (res.statusCode == 200) {
+      return jsonDecode(res.body);
     }
-  }
-
-  // Generic POST helper
-  Future<dynamic> _post(String endpoint, [Map<String, dynamic>? body]) async {
-    final baseUrl = await getBaseUrl();
-    if (baseUrl == null) throw Exception("Server URL not configured");
-
-    try {
-      final response = await http.post(
-        Uri.parse('$baseUrl$endpoint'),
-        headers: {'Content-Type': 'application/json'},
-        body: body != null ? json.encode(body) : null,
-      );
-
-      if (response.statusCode == 200) {
-        return json.decode(response.body);
-      } else {
-        throw Exception('Server error: ${response.statusCode}');
-      }
-    } catch (e) {
-      throw Exception('Connection failed: $e');
-    }
-  }
-
-  // --- API Methods ---
-
-  Future<List<Job>> getJobs() async {
-    final List<dynamic> data = await _get('/api/jobs');
-    return data.map((j) => Job.fromJson(j)).toList();
-  }
-
-  Future<Job> getJob(String id) async {
-    final data = await _get('/api/jobs/$id');
-    return Job.fromJson(data);
+    throw Exception('Failed to connect: ${res.statusCode}');
   }
 
   Future<Map<String, dynamic>> getConfig() async {
-    return await _get('/api/config');
+    final url = await _baseUrl;
+    final res = await http.get(Uri.parse('$url/api/config'));
+    if (res.statusCode == 200) {
+      return jsonDecode(res.body);
+    }
+    throw Exception('Failed to load config');
   }
 
-  Future<String> startDownload(DownloadRequest request) async {
-    final data = await _post('/api/download', request.toJson());
-    return data['job_id'];
+  Future<List<Job>> getJobs() async {
+    final url = await _baseUrl;
+    final res = await http.get(Uri.parse('$url/api/jobs'));
+    if (res.statusCode == 200) {
+      final List<dynamic> data = jsonDecode(res.body);
+      return data.map((j) => Job.fromJson(j)).toList();
+    }
+    throw Exception('Failed to load jobs');
   }
 
-  Future<bool> cancelJob(String jobId) async {
-    try {
-      await _post('/api/jobs/$jobId/cancel');
-      return true;
-    } catch (e) {
-      return false;
+  Future<Job> startDownload(DownloadRequest req) async {
+    final url = await _baseUrl;
+    final res = await http.post(
+      Uri.parse('$url/api/jobs'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode(req.toJson()),
+    );
+    if (res.statusCode == 200 || res.statusCode == 201) {
+      return Job.fromJson(jsonDecode(res.body));
+    }
+    throw Exception('Failed to start download: ${res.body}');
+  }
+
+  Future<void> cancelJob(String id) async {
+    final url = await _baseUrl;
+    final res = await http.post(Uri.parse('$url/api/jobs/$id/cancel'));
+    if (res.statusCode != 200) {
+      throw Exception('Failed to cancel job: ${res.body}');
     }
   }
 
-  Future<List<Map<String, dynamic>>> getFiles() async {
-    final List<dynamic> data = await _get('/api/files');
-    return List<Map<String, dynamic>>.from(data);
+  Future<void> deleteJob(String id) async {
+    final url = await _baseUrl;
+    final res = await http.delete(Uri.parse('$url/api/jobs/$id'));
+    if (res.statusCode != 200) {
+      throw Exception('Failed to delete job: ${res.body}');
+    }
+  }
+
+  Future<List<String>> listFiles() async {
+    final url = await _baseUrl;
+    final res = await http.get(Uri.parse('$url/api/files'));
+    if (res.statusCode == 200) {
+      final List<dynamic> data = jsonDecode(res.body);
+      return data.cast<String>();
+    }
+    throw Exception('Failed to load files');
   }
 
   Future<void> deleteFile(String filename) async {
-    final baseUrl = await getBaseUrl();
-    if (baseUrl == null) throw Exception("Server URL not configured");
-
-    final response = await http.delete(Uri.parse('$baseUrl/api/files/$filename'));
-    if (response.statusCode != 200) {
-      throw Exception('Failed to delete file');
+    final url = await _baseUrl;
+    final res = await http.delete(Uri.parse('$url/api/files/$filename'));
+    if (res.statusCode != 200) {
+      throw Exception('Failed to delete file: ${res.body}');
     }
   }
 }

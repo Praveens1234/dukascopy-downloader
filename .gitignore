@@ -1,44 +1,69 @@
-# Python
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
 *$py.class
+
+# C extensions
 *.so
+
+# Distribution / packaging
 .Python
 build/
 develop-eggs/
 dist/
 downloads/
 eggs/
-.eggs/
-lib/
 lib64/
 parts/
 sdist/
 var/
 wheels/
+share/python-wheels/
 *.egg-info/
 .installed.cfg
 *.egg
 MANIFEST
 
-# Virtual Environment
-venv/
-env/
-ENV/
-.env
+# PyInstaller
+*.manifest
+*.spec
 
-# IDE
-.idea/
-.vscode/
-*.swp
-*.swo
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
 
-# Project Data (Do not push downloaded data)
-data/*.csv
-data/resume_state_*.json
-logs/
-*.log
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+cover/
 
-# OS
-.DS_Store
-Thumbs.db
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# Mobile App
+mobile_app/.dart_tool/
+mobile_app/build/
+mobile_app/.flutter-plugins
+mobile_app/.flutter-plugins-dependencies
+mobile_app/.packages
+mobile_app/.pub-cache/
+mobile_app/.pub/

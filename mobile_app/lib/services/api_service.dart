@@ -110,4 +110,22 @@ class ApiService {
       throw Exception('Failed to delete file');
     }
   }
+
+  Future<List<String>> listFiles() async {
+    final url = await _baseUrl;
+    final res = await http.get(Uri.parse('$url/api/files'));
+    if (res.statusCode == 200) {
+      final List<dynamic> data = jsonDecode(res.body);
+      return data.cast<String>();
+    }
+    throw Exception('Failed to load files');
+  }
+
+  Future<void> deleteFile(String filename) async {
+    final url = await _baseUrl;
+    final res = await http.delete(Uri.parse('$url/api/files/$filename'));
+    if (res.statusCode != 200) {
+      throw Exception('Failed to delete file: ${res.body}');
+    }
+  }
 }

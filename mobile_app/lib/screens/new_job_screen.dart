@@ -33,12 +33,22 @@ class _NewJobScreenState extends State<NewJobScreen> {
   final TextEditingController _customTfValue = TextEditingController(text: '120');
   String _customTfUnit = 'm';
 
+  // Custom Symbol
+  final TextEditingController _customSymbolController = TextEditingController();
+
   bool _isSubmitting = false;
 
   @override
   void initState() {
     super.initState();
     _loadConfig();
+  }
+
+  @override
+  void dispose() {
+    _customTfValue.dispose();
+    _customSymbolController.dispose();
+    super.dispose();
   }
 
   Future<void> _loadConfig() async {
@@ -59,6 +69,22 @@ class _NewJobScreenState extends State<NewJobScreen> {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to load config: $e')));
         setState(() => _isLoadingConfig = false);
       }
+    }
+  }
+
+  void _addCustomSymbol() {
+    final symbol = _customSymbolController.text.trim().toUpperCase();
+    if (symbol.isNotEmpty && !_availableSymbols.contains(symbol)) {
+      setState(() {
+        _availableSymbols.insert(0, symbol); // Add to the beginning of the list
+        _selectedSymbols.add(symbol); // Auto-select the newly added symbol
+        _customSymbolController.clear();
+      });
+    } else if (symbol.isNotEmpty && _availableSymbols.contains(symbol)) {
+      setState(() {
+         _selectedSymbols.add(symbol);
+         _customSymbolController.clear();
+      });
     }
   }
 
@@ -127,9 +153,44 @@ class _NewJobScreenState extends State<NewJobScreen> {
               child: ListView(
                 padding: const EdgeInsets.all(16),
                 children: [
-                  // Symbols
-                  Text('Symbols (${_selectedSymbols.length} selected)', style: Theme.of(context).textTheme.titleMedium),
+                  // Symbols Area
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text('Symbols (${_selectedSymbols.length} selected)',
+                        style: Theme.of(context).textTheme.titleMedium),
+                    ],
+                  ),
                   const SizedBox(height: 8),
+
+                  // Custom Symbol Input
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: _customSymbolController,
+                          decoration: const InputDecoration(
+                            labelText: 'Add Custom Symbol',
+                            hintText: 'e.g. BTCUSD',
+                            border: OutlineInputBorder(),
+                            isDense: true,
+                          ),
+                          onSubmitted: (_) => _addCustomSymbol(),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      IconButton(
+                        onPressed: _addCustomSymbol,
+                        icon: const Icon(Icons.add_circle),
+                        color: Theme.of(context).primaryColor,
+                        iconSize: 32,
+                        tooltip: 'Add Symbol',
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+
+                  // Symbol Chips
                   Wrap(
                     spacing: 8,
                     runSpacing: 8,

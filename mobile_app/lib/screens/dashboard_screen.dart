@@ -4,6 +4,7 @@ import '../models/job.dart';
 import 'new_job_screen.dart';
 import 'job_details_screen.dart';
 import 'files_screen.dart';
+import 'settings_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});

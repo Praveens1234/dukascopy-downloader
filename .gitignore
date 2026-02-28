@@ -1,105 +1,69 @@
-# Python
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
 *$py.class
+
+# C extensions
 *.so
+
+# Distribution / packaging
 .Python
 build/
 develop-eggs/
 dist/
 downloads/
 eggs/
-.eggs/
-lib/
 lib64/
 parts/
 sdist/
 var/
 wheels/
+share/python-wheels/
 *.egg-info/
 .installed.cfg
 *.egg
 MANIFEST
 
-# Virtual Environment
-venv/
-env/
-ENV/
-.env
+# PyInstaller
+*.manifest
+*.spec
 
-# IDE
-.idea/
-.vscode/
-*.swp
-*.swo
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
 
-# Project Data (Do not push downloaded data)
-data/*.csv
-data/resume_state_*.json
-logs/
-*.log
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+cover/
 
-# OS
-.DS_Store
-Thumbs.db
-mobile_app/build/
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# Mobile App
 mobile_app/.dart_tool/
-mobile_app/.idea/
-mobile_app/android/.gradle/
-mobile_app/ios/.symlinks/
-mobile_app/ios/Pods/
-mobile_app/build_log.txt
-mobile_app/build_log_2.txt
-mobile_app/build_log_3.txt
-mobile_app/build_log_4.txt
-mobile_app/pubspec.lock
-mobile_app/android/gradlew
-mobile_app/android/gradlew.bat
-mobile_app/ios/Runner/Assets.xcassets/
-mobile_app/macos/Runner/Assets.xcassets/
-mobile_app/android/app/src/main/res/
-mobile_app/web/
-mobile_app/linux/
-mobile_app/windows/
-mobile_app/macos/
-mobile_app/ios/
-mobile_app/android/gradlew
-mobile_app/android/gradlew.bat
-mobile_app/android/gradle/
-mobile_app/android/local.properties
+mobile_app/build/
 mobile_app/.flutter-plugins
 mobile_app/.flutter-plugins-dependencies
-mobile_app/.metadata
-mobile_app/android/app/src/main/res/mipmap-*/
-mobile_app/android/app/src/main/res/drawable/launch_background.xml
-mobile_app/android/app/src/main/res/drawable-v21/launch_background.xml
-mobile_app/ios/Runner/Assets.xcassets/LaunchImage.imageset/
-mobile_app/ios/Runner/Assets.xcassets/LaunchImage.imageset/Contents.json
-mobile_app/ios/Runner/Assets.xcassets/AppIcon.appiconset/Contents.json
-mobile_app/macos/Runner/Assets.xcassets/AppIcon.appiconset/Contents.json
-mobile_app/ios/Runner.xcodeproj/project.xcworkspace/contents.xcworkspacedata
-mobile_app/ios/Runner.xcodeproj/xcshareddata/xcschemes/
-mobile_app/macos/Runner.xcodeproj/xcshareddata/xcschemes/
-mobile_app/ios/Runner.xcworkspace/xcshareddata/IDEWorkspaceChecks.plist
-mobile_app/macos/Runner.xcworkspace/xcshareddata/IDEWorkspaceChecks.plist
-mobile_app/macos/Runner.xcodeproj/project.xcworkspace/xcshareddata/IDEWorkspaceChecks.plist
-mobile_app/macos/Runner.xcodeproj/project.xcworkspace/contents.xcworkspacedata
-mobile_app/macos/Runner.xcworkspace/contents.xcworkspacedata
-mobile_app/ios/Runner.xcodeproj/project.xcworkspace/xcshareddata/WorkspaceSettings.xcsettings
-mobile_app/ios/Flutter/AppFrameworkInfo.plist
-mobile_app/macos/Runner/Configs/AppInfo.xcconfig
-mobile_app/macos/Runner/Configs/Debug.xcconfig
-mobile_app/macos/Runner/Configs/Release.xcconfig
-mobile_app/macos/Runner/Configs/Warnings.xcconfig
-mobile_app/android/gradle.properties
-mobile_app/android/gradle/wrapper/gradle-wrapper.properties
-mobile_app/android/settings.gradle.kts
-mobile_app/android/app/build.gradle.kts
-mobile_app/android/app/src/main/AndroidManifest.xml
-mobile_app/android/app/src/main/kotlin/
-mobile_app/android/app/src/profile/AndroidManifest.xml
-mobile_app/android/app/src/debug/AndroidManifest.xml
-mobile_app/android/app/src/main/res/mipmap-xhdpi/ic_launcher.png
-mobile_app/android/app/src/main/res/mipmap-xxhdpi/ic_launcher.png
-mobile_app/android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png
-mobile_app/build/app/outputs/flutter-apk/*-release.apk
+mobile_app/.packages
+mobile_app/.pub-cache/
+mobile_app/.pub/

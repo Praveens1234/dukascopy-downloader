@@ -14,6 +14,16 @@ class ApiService {
     return url;
   }
 
+  Future<String?> getBaseUrl() async {
+     final prefs = await SharedPreferences.getInstance();
+     return prefs.getString('server_url');
+  }
+
+  Future<void> setBaseUrl(String url) async {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('server_url', url);
+  }
+
   Future<Map<String, dynamic>> checkConnection(String url) async {
     final res = await http.get(Uri.parse('$url/api/status')).timeout(const Duration(seconds: 5));
     if (res.statusCode == 200) {
@@ -39,6 +49,15 @@ class ApiService {
       return data.map((j) => Job.fromJson(j)).toList();
     }
     throw Exception('Failed to load jobs');
+  }
+
+  Future<Job> getJob(String id) async {
+    final url = await _baseUrl;
+    final res = await http.get(Uri.parse('$url/api/jobs/$id'));
+    if (res.statusCode == 200) {
+      return Job.fromJson(jsonDecode(res.body));
+    }
+    throw Exception('Failed to load job');
   }
 
   Future<Job> startDownload(DownloadRequest req) async {

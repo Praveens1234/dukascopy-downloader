@@ -1,7 +1,10 @@
+import 'dart:io';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:file_saver/file_saver.dart';
+import 'package:share_plus/share_plus.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/api_service.dart';
 
@@ -17,6 +20,7 @@ class _FilesScreenState extends State<FilesScreen> {
   List<String> _files = [];
   bool _isLoading = true;
   final Set<String> _downloadingFiles = {};
+  final Set<String> _sharingFiles = {};
 
   @override
   void initState() {
@@ -78,6 +82,33 @@ class _FilesScreenState extends State<FilesScreen> {
     }
   }
 
+  Future<void> _shareFile(String filename) async {
+    setState(() => _sharingFiles.add(filename));
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final url = prefs.getString('server_url');
+
+      final response = await http.get(Uri.parse('$url/api/files/$filename'));
+      if (response.statusCode == 200) {
+        final dir = await getTemporaryDirectory();
+        final file = File('${dir.path}/$filename');
+        await file.writeAsBytes(response.bodyBytes);
+
+        await Share.shareXFiles([XFile(file.path)], text: 'Dukascopy Data: $filename');
+      } else {
+        throw Exception('Failed to download for sharing: ${response.statusCode}');
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Share error: $e')));
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _sharingFiles.remove(filename));
+      }
+    }
+  }
+
   Future<void> _deleteFile(String filename) async {
     final confirm = await showDialog<bool>(
       context: context,
@@ -121,6 +152,7 @@ class _FilesScreenState extends State<FilesScreen> {
                   itemBuilder: (context, index) {
                     final filename = _files[index];
                     final isDownloading = _downloadingFiles.contains(filename);
+                    final isSharing = _sharingFiles.contains(filename);
                     return ListTile(
                       leading: const Icon(Icons.insert_drive_file),
                       title: Text(filename),
@@ -130,9 +162,16 @@ class _FilesScreenState extends State<FilesScreen> {
                           isDownloading
                             ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2))
                             : IconButton(
-                                icon: const Icon(Icons.download),
-                                tooltip: 'Download and Save',
+                                icon: const Icon(Icons.save_alt),
+                                tooltip: 'Save to Device',
                                 onPressed: () => _downloadFile(filename),
+                              ),
+                          isSharing
+                            ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2))
+                            : IconButton(
+                                icon: const Icon(Icons.share),
+                                tooltip: 'Share File',
+                                onPressed: () => _shareFile(filename),
                               ),
                           IconButton(
                             icon: const Icon(Icons.delete, color: Colors.red),

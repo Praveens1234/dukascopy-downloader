@@ -76,6 +76,10 @@ def parse_candles(raw_data, base_time, symbol):
         chunk = raw_data[i * CANDLE_SIZE: (i + 1) * CANDLE_SIZE]
         time_offset, raw_open, raw_close, raw_low, raw_high, volume = CANDLE_STRUCT.unpack(chunk)
 
+        # Layer 4: Skip candles with zero raw prices (server reset artefacts)
+        if raw_open == 0 and raw_close == 0:
+            continue
+
         dt = base_time + timedelta(seconds=time_offset)
         o = raw_open / point
         h = raw_high / point
@@ -242,7 +246,9 @@ async def fetch_native_candles_async(symbol, start_date, end_date, timeframe_str
                     base_time = datetime(base_date.year, 1, 1, 0, 0, 0)
 
                 candles = parse_candles(raw, base_time, symbol)
-                all_candles.extend(candles)
+                # Filter out candles with zero prices (gaps/holidays)
+                valid_candles = [c for c in candles if c[1] > 0 and c[4] > 0]
+                all_candles.extend(valid_candles)
             except Exception as e:
                 Logger.error(f"Error parsing candle data from {url}: {e}")
 

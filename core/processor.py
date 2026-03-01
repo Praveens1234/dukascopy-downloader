@@ -77,7 +77,9 @@ def normalize_hour(symbol, day, hour, ticks):
             round(bid_vol * VOLUME_MULTIPLIER),
         )
 
-    return list(map(lambda t: norm(*t), ticks))
+    normalized = [norm(*t) for t in ticks]
+    # Layer 1: Drop ticks where both ask and bid are zero (server reset artefacts)
+    return [t for t in normalized if t[1] > 0 or t[2] > 0]
 
 
 def decompress(symbol, day, hourly_data_list):

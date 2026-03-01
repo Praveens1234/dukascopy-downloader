@@ -130,16 +130,18 @@ class CSVDumper:
             key = int(ts - (ts % self.timeframe))
 
             if previous_key != key and previous_key is not None:
-                n = int((key - previous_key) / self.timeframe)
-                for i in range(n):
+                # Layer 2: Only emit a candle if we have real price data.
+                # Never create filler candles for gaps — gaps stay as gaps.
+                if current_prices:
                     candle = Candle(
                         self.symbol,
-                        previous_key + i * self.timeframe,
+                        previous_key,
                         self.timeframe,
-                        current_prices if i == 0 else []
+                        current_prices,
                     )
-                    candle._volume = sum(current_volumes) if i == 0 else 0
-                    self.buffer[day].append(candle)
+                    if candle.open_price > 0:
+                        candle._volume = sum(current_volumes)
+                        self.buffer[day].append(candle)
                 current_prices = []
                 current_volumes = []
 
@@ -150,8 +152,9 @@ class CSVDumper:
         # Last candle
         if previous_key is not None and current_prices:
             candle = Candle(self.symbol, previous_key, self.timeframe, current_prices)
-            candle._volume = sum(current_volumes)
-            self.buffer[day].append(candle)
+            if candle.open_price != 0:
+                candle._volume = sum(current_volumes)
+                self.buffer[day].append(candle)
 
     def append_native_candles(self, candles):
         """
@@ -180,6 +183,9 @@ class CSVDumper:
             if self.native_candles:
                 self.native_candles.sort(key=lambda c: c[0])
                 for c in self.native_candles:
+                    # Layer 3: Skip zero-price native candles (server reset rows)
+                    if c[1] <= 0 and c[4] <= 0:
+                        continue
                     writer.writerow({
                         'time': format_datetime(c[0]),
                         'open': format_float(c[1]),
@@ -201,6 +207,9 @@ class CSVDumper:
                                 'bid_volume': value[4],
                             })
                         else:
+                            # Layer 3: Final guard — never write zero-price candles
+                            if value.open_price <= 0 and value.close_price <= 0:
+                                continue
                             writer.writerow({
                                 'time': stringify_utc(value.timestamp),
                                 'open': format_float(value.open_price),

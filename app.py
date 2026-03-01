@@ -22,7 +22,7 @@ from utils.progress import DownloadProgress
 from utils.resume import save_state, load_state, clear_state
 from utils.logger import get_logger
 
-Logger = get_logger()
+Logger = get_logger(log_file='download.log')
 
 
 def generate_days(start, end):

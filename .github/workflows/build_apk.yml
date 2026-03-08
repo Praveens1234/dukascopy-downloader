@@ -30,12 +30,12 @@ jobs:
         working-directory: ./mobile_app
         run: flutter pub get
 
-      - name: Build APK (Debug)
+      - name: Build APK (Release)
         working-directory: ./mobile_app
-        run: flutter build apk --debug
+        run: flutter build apk --release --split-per-abi
 
-      - name: Upload APK artifact
+      - name: Upload APK artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: dukascopy-downloader-app
-          path: mobile_app/build/app/outputs/flutter-apk/app-debug.apk
+          name: dukascopy-downloader-release-apks
+          path: mobile_app/build/app/outputs/flutter-apk/app-*-release.apk

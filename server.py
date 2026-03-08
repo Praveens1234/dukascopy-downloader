@@ -335,6 +335,28 @@ async def serve_frontend():
         return HTMLResponse(content=f.read())
 
 
+@app.get("/api/connection_info")
+async def get_connection_info(request: Request):
+    """Return the server's local IP and Port for mobile app discovery via QR."""
+    import socket
+    def get_local_ip():
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(("8.8.8.8", 80))
+            ip = s.getsockname()[0]
+            s.close()
+            return ip
+        except Exception:
+            return "127.0.0.1"
+
+    local_ip = get_local_ip()
+    port = request.url.port or 8000
+    return {
+        "ip": local_ip,
+        "port": port,
+        "url": f"http://{local_ip}:{port}"
+    }
+
 @app.get("/api/config")
 async def get_config():
     """Return available symbols, timeframes, and defaults."""

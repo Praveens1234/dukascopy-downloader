@@ -11,6 +11,8 @@
     <link
         href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
         rel="stylesheet">
+    <!-- QR Code Generator -->
+    <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js"></script>
     <style>
         /* ===== CSS Reset & Variables ===== */
         *,
@@ -131,6 +133,89 @@
             display: flex;
             align-items: center;
             gap: 10px;
+        }
+
+        #qrCodeBtn {
+            cursor: pointer;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            padding: 6px 12px;
+            color: var(--text-primary);
+            font-size: 0.85rem;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            transition: all 0.2s;
+        }
+
+        #qrCodeBtn:hover {
+            border-color: var(--accent);
+            background: var(--bg-card-hover);
+        }
+
+        /* Modal */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.7);
+            backdrop-filter: blur(4px);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 2000;
+            opacity: 0;
+            transition: opacity 0.2s;
+        }
+
+        .modal-overlay.active {
+            display: flex;
+            opacity: 1;
+        }
+
+        .modal-content {
+            background: var(--bg-primary);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-lg);
+            padding: 30px;
+            text-align: center;
+            box-shadow: var(--shadow-lg);
+            max-width: 400px;
+            width: 90%;
+            transform: translateY(20px);
+            transition: transform 0.2s;
+        }
+
+        .modal-overlay.active .modal-content {
+            transform: translateY(0);
+        }
+
+        .qr-container {
+            background: white;
+            padding: 16px;
+            border-radius: var(--radius-sm);
+            display: inline-block;
+            margin: 20px 0;
+        }
+
+        .modal-title {
+            font-size: 1.2rem;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+
+        .modal-desc {
+            color: var(--text-muted);
+            font-size: 0.9rem;
+            margin-bottom: 16px;
+        }
+
+        .close-modal {
+            margin-top: 10px;
+            width: 100%;
         }
 
         .status-badge {
@@ -931,6 +1016,9 @@
                 </div>
             </div>
             <div class="header-right">
+                <button id="qrCodeBtn" onclick="showQRModal()">
+                    <span class="icon">📱</span> Connect App
+                </button>
                 <div class="status-badge" id="wsStatus">
                     <div class="status-dot"></div>
                     <span>Connected</span>
@@ -1178,6 +1266,19 @@
     <!-- Toast Container -->
     <div class="toast-container" id="toastContainer"></div>
 
+    <!-- QR Code Modal -->
+    <div class="modal-overlay" id="qrModal" onclick="if(event.target===this) closeQRModal()">
+        <div class="modal-content">
+            <h3 class="modal-title">Mobile App Connection</h3>
+            <p class="modal-desc">Scan this QR code from the Dukascopy mobile app to instantly connect to this server over your local network.</p>
+            <div class="qr-container" id="qrcode"></div>
+            <div style="font-family: var(--font-mono); font-size: 0.85rem; color: var(--accent); margin-bottom: 20px;" id="qrUrlDisplay">
+                Loading...
+            </div>
+            <button class="btn btn-secondary close-modal" onclick="closeQRModal()">Close</button>
+        </div>
+    </div>
+
     <script>
         // ===== State =====
         let selectedSymbols = new Set();
@@ -1190,7 +1291,35 @@
             connectWebSocket();
             loadJobs();
             loadFiles();
+            loadConnectionInfo();
         });
+
+        // ===== Connection Info & QR =====
+        let connectionUrl = '';
+        async function loadConnectionInfo() {
+            try {
+                const res = await fetch('/api/connection_info');
+                const info = await res.json();
+                connectionUrl = info.url;
+                document.getElementById('qrUrlDisplay').textContent = connectionUrl;
+
+                // Generate QR Code
+                const qr = qrcode(0, 'M');
+                qr.addData(connectionUrl);
+                qr.make();
+                document.getElementById('qrcode').innerHTML = qr.createImgTag(5, 0);
+            } catch (e) {
+                console.error('Failed to load connection info', e);
+            }
+        }
+
+        function showQRModal() {
+            document.getElementById('qrModal').classList.add('active');
+        }
+
+        function closeQRModal() {
+            document.getElementById('qrModal').classList.remove('active');
+        }
 
         // ===== Config =====
         async function loadConfig() {

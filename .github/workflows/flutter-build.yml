@@ -1,0 +1,70 @@
+name: Build Flutter APK
+
+on:
+  push:
+    branches:
+      - flutter-app
+      - 'feature/**'
+  pull_request:
+    branches:
+      - flutter-app
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.24.0'
+          channel: 'stable'
+          cache: true
+
+      - name: Get Flutter dependencies
+        run: |
+          cd mobile_app
+          flutter pub get
+
+      - name: Verify Flutter installation
+        run: |
+          cd mobile_app
+          flutter doctor -v
+
+      - name: Analyze Dart code
+        run: |
+          cd mobile_app
+          flutter analyze
+
+      - name: Build APK
+        run: |
+          cd mobile_app
+          flutter build apk --release --no-pub
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-release.apk
+          path: mobile_app/build/app/outputs/flutter-apk/app-release.apk
+
+      - name: Create Release
+        if: startsWith(github.ref, 'refs/heads/flutter-app') || startsWith(github.ref, 'refs/heads/feature/')
+        uses: softprops/action-gh-release@v1
+        with:
+          files: mobile_app/build/app/outputs/flutter-apk/app-release.apk
+          tag_name: mobile-app-${{ github.run_number }}
+          name: "Mobile App Release #${{ github.run_number }}"
+          draft: false
+          prerelease: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

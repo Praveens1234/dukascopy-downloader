@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../services/api_service.dart';
 import '../models/job.dart';
-import 'job_detail_screen.dart';
 
 class JobsScreen extends StatefulWidget {
   const JobsScreen({super.key});
@@ -76,10 +75,6 @@ class _JobsScreenState extends State<JobsScreen> {
         trailing: Icon(
           job.isRunning ? Icons.hourglass_empty : (job.isCompleted ? Icons.check_circle : Icons.error),
           color: job.isRunning ? Colors.orange : (job.isCompleted ? Colors.green : Colors.red),
-        ),
-        onTap: () => Navigator.push(
-          context,
-          MaterialPageRoute(builder: (_) => JobDetailScreen(jobId: job.id)),
         ),
       ),
     );

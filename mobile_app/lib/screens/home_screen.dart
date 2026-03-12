@@ -3,7 +3,6 @@ import 'package:provider/provider.dart';
 import '../services/api_service.dart';
 import '../services/server_config_service.dart';
 import '../models/download_config.dart';
-import 'job_detail_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -267,11 +266,8 @@ class _HomeScreenState extends State<HomeScreen> {
       final result = await apiService.startDownload(config);
       final jobId = result['job_id'];
       if (mounted) {
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (_) => JobDetailScreen(jobId: jobId!),
-          ),
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Download started: $jobId')),
         );
       }
     } catch (e) {

@@ -70,23 +70,12 @@ class _FilesScreenState extends State<FilesScreen> {
           mainAxisSize: MainAxisSize.min,
           children: [
             IconButton(
-              icon: const Icon(Icons.download),
-              onPressed: () => _downloadFile(file),
-            ),
-            IconButton(
               icon: const Icon(Icons.delete),
               onPressed: () => _deleteFile(file),
             ),
           ],
         ),
       ),
-    );
-  }
-
-  Future<void> _downloadFile(FileInfo file) async {
-    // Implementation for downloading file to device
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Downloading ${file.name}...')),
     );
   }
 

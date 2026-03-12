@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'services/server_config_service.dart';
 import 'services/api_service.dart';
-import 'services/websocket_service.dart';
 import 'screens/home_screen.dart';
 import 'screens/jobs_screen.dart';
 import 'screens/files_screen.dart';
@@ -22,7 +21,6 @@ class DukascopyApp extends StatelessWidget {
       providers: [
         ChangeNotifierProvider(create: (_) => ServerConfigService()),
         ChangeNotifierProvider(create: (_) => ApiService()),
-        ChangeNotifierProvider(create: (_) => WebSocketService()),
       ],
       child: Consumer<ServerConfigService>(
         builder: (context, serverConfig, _) {

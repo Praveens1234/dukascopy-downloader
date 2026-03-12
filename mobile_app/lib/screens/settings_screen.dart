@@ -34,8 +34,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
           children: [
             _buildServerCard(),
             const SizedBox(height: 16),
-            _buildPreferencesCard(),
-            const SizedBox(height: 16),
             _buildAboutCard(),
           ],
         ),
@@ -99,26 +97,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ),
                 ),
               ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildPreferencesCard() {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text('Preferences', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 12),
-            const ListTile(
-              title: Text('Dark Mode'),
-              subtitle: Text('System default'),
-              trailing: Icon(Icons.brightness_auto),
             ),
           ],
         ),

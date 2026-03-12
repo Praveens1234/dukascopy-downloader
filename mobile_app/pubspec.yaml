@@ -1,0 +1,31 @@
+name: dukascopy_mobile
+description: Dukascopy Historical Data Downloader - Mobile Edition
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  # HTTP & WebSocket
+  http: ^1.2.0
+  web_socket_channel: ^2.4.0
+  # State Management
+  provider: ^6.1.1
+  # Utilities
+  intl: ^0.19.0
+  share_plus: ^7.2.1
+  url_launcher: ^6.2.4
+  # UI
+  flutter_animate: ^4.4.1
+  
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.0
+
+flutter:
+  uses-material-design: true
+  font-family: Roboto

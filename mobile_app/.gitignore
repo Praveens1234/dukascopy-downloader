@@ -1,0 +1,26 @@
+# Miscellaneous
+*.dart_tool/
+*.lock
+*.log
+*.tmp
+
+# Build outputs
+build/
+*.apk
+*.aab
+*.ipa
+
+# IDE
+.vscode/
+.idea/
+*.iml
+
+# Android
+.gradle/
+local.properties
+
+# iOS
+Pods/
+
+# macOS
+.DS_Store

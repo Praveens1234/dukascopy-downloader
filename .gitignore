@@ -42,3 +42,6 @@ logs/
 # OS
 .DS_Store
 Thumbs.db
+
+# Override: Don't ignore Flutter lib folder
+!mobile_app/lib/

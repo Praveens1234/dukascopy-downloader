@@ -141,9 +141,7 @@ class CSVDumper:
                     )
                     if candle.open_price > 0:
                         candle._volume = sum(current_volumes)
-                        # Ensure we don't emit synthetic 0-volume candles
-                        if candle._volume > 0:
-                            self.buffer[day].append(candle)
+                        self.buffer[day].append(candle)
                 current_prices = []
                 current_volumes = []
 
@@ -151,12 +149,12 @@ class CSVDumper:
             current_volumes.append(self._get_volume(tick))
             previous_key = key
 
+        # Last candle
         if previous_key is not None and current_prices:
             candle = Candle(self.symbol, previous_key, self.timeframe, current_prices)
-            if candle.open_price > 0:
+            if candle.open_price != 0:
                 candle._volume = sum(current_volumes)
-                if candle._volume > 0:
-                    self.buffer[day].append(candle)
+                self.buffer[day].append(candle)
 
     def append_native_candles(self, candles):
         """
@@ -185,8 +183,8 @@ class CSVDumper:
             if self.native_candles:
                 self.native_candles.sort(key=lambda c: c[0])
                 for c in self.native_candles:
-                    # Layer 3: Skip zero-price native candles
-                    if (c[1] <= 0 and c[4] <= 0):
+                    # Layer 3: Skip zero-price native candles (server reset rows)
+                    if c[1] <= 0 and c[4] <= 0:
                         continue
                     writer.writerow({
                         'time': format_datetime(c[0]),
@@ -209,9 +207,8 @@ class CSVDumper:
                                 'bid_volume': value[4],
                             })
                         else:
-                            # Layer 3: Final guard — never write zero-price or zero-volume candles
-                            vol = getattr(value, '_volume', 0)
-                            if (value.open_price <= 0 and value.close_price <= 0) or vol <= 0:
+                            # Layer 3: Final guard — never write zero-price candles
+                            if value.open_price <= 0 and value.close_price <= 0:
                                 continue
                             writer.writerow({
                                 'time': stringify_utc(value.timestamp),

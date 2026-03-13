@@ -76,6 +76,10 @@ def parse_candles(raw_data, base_time, symbol):
         chunk = raw_data[i * CANDLE_SIZE: (i + 1) * CANDLE_SIZE]
         time_offset, raw_open, raw_close, raw_low, raw_high, volume = CANDLE_STRUCT.unpack(chunk)
 
+        # Print the first few volumes for debugging
+        if i == 0:
+            raise RuntimeError(f"Debug native volume: {volume}")
+
         # Layer 4: Skip candles with zero raw prices (server reset artefacts)
         if raw_open == 0 and raw_close == 0:
             continue

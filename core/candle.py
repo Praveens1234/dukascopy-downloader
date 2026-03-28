@@ -51,3 +51,13 @@ class Candle:
             and self.high == other.high
             and self.low == other.low
         )
+
+    @property
+    def is_empty(self):
+        """True if this candle has no meaningful price data (all zeros)."""
+        return self.open_price == 0 and self.close_price == 0 and self.high == 0 and self.low == 0
+
+    @property
+    def ohlcv_tuple(self):
+        """Return (open, high, low, close, volume) for comparison."""
+        return (self.open_price, self.high, self.low, self.close_price, getattr(self, '_volume', 0))

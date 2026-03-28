@@ -82,11 +82,42 @@ def normalize_hour(symbol, day, hour, ticks):
     return [t for t in normalized if t[1] > 0 or t[2] > 0]
 
 
+def _filter_forward_filled_ticks(ticks):
+    """
+    Remove forward-filled synthetic ticks from sorted tick data.
+
+    Dukascopy fills market closure periods (weekends, daily server resets,
+    holidays) by repeating the last known tick values. Consecutive ticks
+    with identical (ask, bid, ask_vol, bid_vol) are synthetic and must
+    be removed to prevent fake candles in the output.
+
+    Args:
+        ticks: Sorted list of (datetime, ask, bid, ask_vol, bid_vol) tuples
+
+    Returns:
+        Filtered list with forward-filled ticks removed.
+    """
+    if not ticks:
+        return ticks
+
+    filtered = [ticks[0]]
+    prev_vals = (ticks[0][1], ticks[0][2], ticks[0][3], ticks[0][4])
+
+    for tick in ticks[1:]:
+        vals = (tick[1], tick[2], tick[3], tick[4])
+        if vals == prev_vals:
+            continue  # Forward-filled duplicate — skip
+        prev_vals = vals
+        filtered.append(tick)
+
+    return filtered
+
+
 def decompress(symbol, day, hourly_data_list):
     """
     Full pipeline: for each (hour, compressed_bytes), decompress -> tokenize -> normalize.
     Returns combined list of (datetime, ask, bid, ask_volume, bid_volume) tuples,
-    sorted chronologically.
+    sorted chronologically, with forward-filled synthetic ticks removed.
     
     Args:
         symbol: Currency pair symbol
@@ -111,4 +142,8 @@ def decompress(symbol, day, hourly_data_list):
 
     # Sort by timestamp to ensure chronological order
     all_ticks.sort(key=lambda t: t[0])
+
+    # Remove forward-filled synthetic ticks (market closure periods)
+    all_ticks = _filter_forward_filled_ticks(all_ticks)
+
     return all_ticks

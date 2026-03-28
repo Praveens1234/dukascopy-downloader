@@ -56,6 +56,12 @@ def decompress_lzma(data):
 def parse_candles(raw_data, base_time, symbol):
     """
     Parse decompressed candle binary data into OHLCV tuples.
+    Filters out forward-filled fake candles that Dukascopy injects during
+    market closures (weekends, holidays, daily server resets ~22:00-23:00 UTC).
+
+    Detection: Dukascopy fills closure periods by repeating the last known
+    OHLCV values for every minute slot. Consecutive identical OHLCV tuples
+    are statistically impossible in real liquid market data, so we skip them.
 
     Binary format per candle (24 bytes, big-endian):
         uint32 time_offset  (seconds from base_time)
@@ -66,11 +72,13 @@ def parse_candles(raw_data, base_time, symbol):
         float32 volume
 
     Returns:
-        List of (datetime, open, high, low, close, volume) tuples.
+        List of (datetime, open, high, low, close, volume) tuples (real candles only).
     """
     point = SPECIAL_POINT_SYMBOLS.get(symbol.lower(), DEFAULT_POINT_VALUE)
     candles = []
     count = len(raw_data) // CANDLE_SIZE
+    prev_ohlcv = None
+    filtered_count = 0
 
     for i in range(count):
         chunk = raw_data[i * CANDLE_SIZE: (i + 1) * CANDLE_SIZE]
@@ -83,7 +91,25 @@ def parse_candles(raw_data, base_time, symbol):
         c = raw_close / point
         v = round(volume, 2)
 
+        # Forward-fill detection: skip candles with identical OHLCV to prev
+        ohlcv = (raw_open, raw_close, raw_low, raw_high, volume)
+        if ohlcv == prev_ohlcv:
+            filtered_count += 1
+            continue
+
+        # Also skip all-zero candles (server artefacts)
+        if raw_open == 0 and raw_close == 0 and raw_low == 0 and raw_high == 0:
+            filtered_count += 1
+            continue
+
+        prev_ohlcv = ohlcv
         candles.append((dt, o, h, l, c, v))
+
+    if filtered_count > 0:
+        Logger.debug(
+            f"Filtered {filtered_count} forward-filled candles for "
+            f"{symbol} at {base_time.date()} ({count} raw → {len(candles)} real)"
+        )
 
     return candles
 

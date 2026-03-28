@@ -182,10 +182,16 @@ class CSVDumper:
             # If we have native candles, write them directly
             if self.native_candles:
                 self.native_candles.sort(key=lambda c: c[0])
+                prev_ohlcv = None
                 for c in self.native_candles:
                     # Layer 3: Skip zero-price native candles (server reset rows)
                     if c[1] <= 0 and c[4] <= 0:
                         continue
+                    # Layer 4: Final guard — skip consecutive duplicate OHLCV
+                    ohlcv = (c[1], c[2], c[3], c[4], c[5])
+                    if ohlcv == prev_ohlcv:
+                        continue
+                    prev_ohlcv = ohlcv
                     writer.writerow({
                         'time': format_datetime(c[0]),
                         'open': format_float(c[1]),
@@ -196,6 +202,7 @@ class CSVDumper:
                     })
             else:
                 # Write tick or tick-derived candle data
+                prev_candle_ohlcv = None
                 for day in sorted(self.buffer.keys()):
                     for value in self.buffer[day]:
                         if self.timeframe == TimeFrame.TICK:
@@ -210,6 +217,12 @@ class CSVDumper:
                             # Layer 3: Final guard — never write zero-price candles
                             if value.open_price <= 0 and value.close_price <= 0:
                                 continue
+                            # Layer 4: Skip consecutive duplicate OHLCV candles
+                            ohlcv = (value.open_price, value.high, value.low,
+                                     value.close_price, getattr(value, '_volume', 0))
+                            if ohlcv == prev_candle_ohlcv:
+                                continue
+                            prev_candle_ohlcv = ohlcv
                             writer.writerow({
                                 'time': stringify_utc(value.timestamp),
                                 'open': format_float(value.open_price),

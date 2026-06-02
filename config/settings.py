@@ -141,6 +141,25 @@ SPECIAL_POINT_SYMBOLS = {
 }
 DEFAULT_POINT_VALUE = 100000
 
+def get_point_value(symbol):
+    """Get the price divisor/point value for a symbol.
+    Forex pairs usually use 100000, while JPY, RUB, XAG, XAU, and Index CFDs use 1000.
+    """
+    sym_upper = symbol.upper()
+    if "JPY" in sym_upper or "RUB" in sym_upper or "IDX" in sym_upper or "XAG" in sym_upper or "XAU" in sym_upper:
+        return 1000
+    sym_lower = symbol.lower()
+    if sym_lower in SPECIAL_POINT_SYMBOLS:
+        return SPECIAL_POINT_SYMBOLS[sym_lower]
+    return DEFAULT_POINT_VALUE
+
+def normalize_symbol_for_url(symbol):
+    """Normalize symbol to match Dukascopy datafeed URL naming convention.
+    Removes slashes, dots, hyphens, and underscores, e.g. DEU.IDX/EUR -> DEUIDXEUR.
+    """
+    return symbol.replace('/', '').replace('.', '').replace('-', '').replace('_', '').upper()
+
+
 # Volume multiplier
 VOLUME_MULTIPLIER = 1_000_000
 

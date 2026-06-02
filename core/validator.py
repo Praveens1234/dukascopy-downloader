@@ -5,6 +5,41 @@ Data validator - Post-download checks for data integrity.
 from datetime import timedelta
 
 
+def _parse_time(time_str):
+    """Parse a time string, trying multiple formats.
+
+    The CSV output uses DD.MM.YYYY HH:MM:SS[.mmm] format.
+    This function handles that format as well as ISO format for robustness.
+    """
+    from datetime import datetime
+
+    time_str = time_str.strip()
+
+    # Try DD.MM.YYYY HH:MM:SS.mmm (our output format, with optional milliseconds)
+    for fmt in ('%d.%m.%Y %H:%M:%S', '%d.%m.%Y %H:%M:%S.%f', '%Y-%m-%d %H:%M:%S'):
+        try:
+            return datetime.strptime(time_str, fmt)
+        except ValueError:
+            continue
+
+    # Fallback: strip sub-second part and try DD.MM.YYYY HH:MM:SS
+    base = time_str.split('.')[0]
+    # But DD.MM.YYYY also starts with dots, so only strip if there's a space before the dot
+    if ' ' in time_str:
+        date_part, time_part = time_str.rsplit(' ', 1)
+        # time_part might have .mmm at the end
+        if '.' in time_part:
+            time_part = time_part.split('.')[0]
+        clean = f"{date_part} {time_part}"
+        for fmt in ('%d.%m.%Y %H:%M:%S', '%Y-%m-%d %H:%M:%S'):
+            try:
+                return datetime.strptime(clean, fmt)
+            except ValueError:
+                continue
+
+    raise ValueError(f"Cannot parse time string: '{time_str}'")
+
+
 def validate_output(file_path, start_date, end_date, symbol):
     """
     Validate the downloaded CSV data.
@@ -36,18 +71,22 @@ def validate_output(file_path, start_date, end_date, symbol):
         # Check for chronological ordering
         prev_time = None
         out_of_order = 0
+        parse_errors = 0
         for row in rows:
             time_str = row.get('time', '')
             try:
-                current_time = datetime.strptime(time_str.split('.')[0], '%Y-%m-%d %H:%M:%S')
+                current_time = _parse_time(time_str)
                 if prev_time and current_time < prev_time:
                     out_of_order += 1
                 prev_time = current_time
-            except ValueError:
-                pass
+            except (ValueError, TypeError):
+                parse_errors += 1
 
         if out_of_order > 0:
             results['issues'].append(f"{out_of_order} rows are out of chronological order")
+
+        if parse_errors > 0:
+            results['issues'].append(f"{parse_errors} rows had unparseable timestamps")
 
         # Check price sanity (basic range check)
         if 'ask' in rows[0]:

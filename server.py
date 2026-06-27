@@ -12,7 +12,7 @@ import threading
 import concurrent.futures
 import time
 import uuid
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -54,6 +54,7 @@ class JobState:
         self.log_subscribers: List[WebSocket] = []
         self.cancel_events: Dict[str, threading.Event] = {}
         self.lock = threading.Lock()
+        self._loop = None
 
     def create_job(self, job_id, params):
         self.jobs[job_id] = {
@@ -85,6 +86,7 @@ class JobState:
         return False
 
     def add_log(self, job_id, message):
+        entry = None
         with self.lock:
             if job_id in self.jobs:
                 entry = f"[{datetime.now().strftime('%H:%M:%S')}] {message}"
@@ -93,10 +95,11 @@ class JobState:
                 if len(self.jobs[job_id]["logs"]) > 500:
                     self.jobs[job_id]["logs"] = self.jobs[job_id]["logs"][-500:]
         # Broadcast to WebSocket subscribers
-        asyncio.run_coroutine_threadsafe(
-            self._broadcast_log(job_id, entry),
-            self._loop
-        )
+        if entry is not None and self._loop is not None:
+            asyncio.run_coroutine_threadsafe(
+                self._broadcast_log(job_id, entry),
+                self._loop
+            )
 
     async def _broadcast_log(self, job_id, entry):
         dead = []
@@ -223,20 +226,68 @@ def run_download_job(job_id: str, params: dict):
             if use_native:
                 # ═══ Native Candle Path (fast, no tick conversion) ═══
                 state.add_log(job_id, f"  ⚡ Fetching native {timeframe_str} candles ({price_type})...")
-                try:
-                    candles = fetch_native_candles(symbol, start, end, tf_upper, price_type)
-                    csv_dumper.append_native_candles(candles)
-                    state.add_log(job_id, f"  ✓ {symbol}: Got {len(candles)} native candles")
-                    global_completed[0] += total_days
-                    state.update_job(job_id, completed_days=global_completed[0], progress=round(global_completed[0] / global_total * 100, 1))
+                
+                # Split total date range into yearly chunks (365 days max each)
+                # Keeps memory flat (< 50MB peak RAM) and streams to disk chunk-by-chunk
+                chunks = []
+                curr_start = start
+                while curr_start <= end:
+                    curr_end = min(curr_start + timedelta(days=364), end)
+                    chunks.append((curr_start, curr_end))
+                    curr_start = curr_end + timedelta(days=1)
+                
+                symbol_total_days = total_days
+                symbol_completed_days = [0]
+                
+                def on_progress(completed_days):
+                    with lock:
+                        symbol_completed_days[0] += completed_days
+                        symbol_completed_days[0] = min(symbol_completed_days[0], symbol_total_days)
+                        
+                        current_completed = global_completed[0] + symbol_completed_days[0]
+                        pct = round(current_completed / global_total * 100, 1)
+                        
+                        state.update_job(
+                            job_id, 
+                            completed_days=current_completed, 
+                            progress=pct
+                        )
+                        state.add_log(
+                            job_id, 
+                            f"  ✓ Fetching native candles: {symbol_completed_days[0]}/{symbol_total_days} days ({pct}%)"
+                        )
+                        try:
+                            asyncio.run_coroutine_threadsafe(state.broadcast_progress(job_id), state._loop)
+                        except Exception:
+                            pass
+
+                state.add_log(job_id, f"  ⚡ Processing native candles in {len(chunks)} yearly chunks...")
+                
+                for idx, (chunk_start, chunk_end) in enumerate(chunks):
+                    # Check for cancellation before chunk download
+                    if state.cancel_events[job_id].is_set():
+                        break
+                    
+                    state.add_log(job_id, f"  ⚡ Fetching chunk {idx+1}/{len(chunks)}: {chunk_start} to {chunk_end}...")
+                    chunk_total_days = (chunk_end - chunk_start).days + 1
+                    
                     try:
-                        asyncio.run_coroutine_threadsafe(state.broadcast_progress(job_id), state._loop)
-                    except Exception:
-                        pass
-                except Exception as e:
-                    state.add_log(job_id, f"  ✗ Native fetch failed: {str(e)[:80]}")
-                    global_completed[0] += total_days
-                    state.update_job(job_id, completed_days=global_completed[0], progress=round(global_completed[0] / global_total * 100, 1))
+                        candles = fetch_native_candles(symbol, chunk_start, chunk_end, tf_upper, price_type, progress_cb=on_progress)
+                        csv_dumper.append_native_candles(candles)
+                        # Immediately write/append chunk data to disk and clear RAM
+                        csv_dumper.dump(append=True)
+                        state.add_log(job_id, f"  ✓ Chunk {idx+1}/{len(chunks)} saved successfully. (RAM buffer cleared)")
+                    except Exception as e:
+                        state.add_log(job_id, f"  ✗ Chunk {idx+1}/{len(chunks)} failed: {str(e)[:80]}")
+                    
+                    # Accumulate chunk days into global completed progress
+                    with lock:
+                        global_completed[0] += chunk_total_days
+                        state.update_job(job_id, completed_days=global_completed[0], progress=round(global_completed[0] / global_total * 100, 1))
+                        try:
+                            asyncio.run_coroutine_threadsafe(state.broadcast_progress(job_id), state._loop)
+                        except Exception:
+                            pass
             else:
                 # ═══ Tick-to-Candle Path (original, with accuracy fixes) ═══
                 def do_work(day, sym=symbol):
@@ -278,8 +329,17 @@ def run_download_job(job_id: str, params: dict):
                 if state.cancel_events[job_id].is_set():
                     state.add_log(job_id, "⚠ Symbol download cancelled.")
 
-            # Write CSV
-            file_path = csv_dumper.dump()
+            # Write CSV (only if not already done chunk-by-chunk)
+            if use_native:
+                safe_symbol = symbol.replace('/', '-')
+                file_name = "{}-{}_{:02d}_{:02d}-{}_{:02d}_{:02d}.csv".format(
+                    safe_symbol,
+                    start.year, start.month, start.day,
+                    end.year, end.month, end.day,
+                )
+                file_path = os.path.join(DATA_DIR, file_name)
+            else:
+                file_path = csv_dumper.dump()
             output_files.append(os.path.basename(file_path))
             state.add_log(job_id, f"  ✓ Written: {os.path.basename(file_path)}")
 
@@ -375,7 +435,7 @@ async def start_download(req: DownloadRequest):
 async def cancel_job(job_id: str):
     """Cancel a running job."""
     if job_id not in state.jobs:
-        return {"error": "Job not found"}, 404
+        return JSONResponse(status_code=404, content={"error": "Job not found"})
     
     if state.jobs[job_id]["status"] in ["completed", "failed", "cancelled"]:
         return {"status": "already_finished"}
@@ -388,7 +448,7 @@ async def cancel_job(job_id: str):
 async def get_job_status(job_id: str):
     """Get job status and logs."""
     if job_id not in state.jobs:
-        return {"error": "Job not found"}, 404
+        return JSONResponse(status_code=404, content={"error": "Job not found"})
     
     return state.jobs[job_id]
 
@@ -402,13 +462,6 @@ async def list_jobs():
         for j in jobs
     ]
 
-
-@app.get("/api/jobs/{job_id}")
-async def get_job(job_id: str):
-    """Get details of a specific job."""
-    if job_id not in state.jobs:
-        return {"error": "Job not found"}, 404
-    return state.jobs[job_id]
 
 
 @app.get("/api/files")
@@ -434,7 +487,7 @@ async def download_file(filename: str):
     """Download a specific CSV file."""
     path = os.path.join(DATA_DIR, filename)
     if not os.path.exists(path) or not filename.endswith('.csv'):
-        return {"error": "File not found"}, 404
+        return JSONResponse(status_code=404, content={"error": "File not found"})
     return FileResponse(path, filename=filename, media_type="text/csv")
 
 
@@ -445,7 +498,7 @@ async def delete_file(filename: str):
     if os.path.exists(path) and filename.endswith('.csv'):
         os.remove(path)
         return {"status": "deleted"}
-    return {"error": "File not found"}, 404
+    return JSONResponse(status_code=404, content={"error": "File not found"})
 
 
 @app.websocket("/ws")

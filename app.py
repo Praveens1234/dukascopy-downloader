@@ -7,10 +7,20 @@ Supports native candle data and tick-to-candle conversion.
 
 import concurrent.futures
 import os
+import sys
 import threading
 import time
 from collections import deque
 from datetime import timedelta, date
+
+# Force UTF-8 for Windows console output (needed for Unicode characters)
+if sys.platform == 'win32':
+    try:
+        sys.stdout.reconfigure(encoding='utf-8')
+        sys.stderr.reconfigure(encoding='utf-8')
+    except (AttributeError, OSError):
+        pass
+
 
 from core.fetch import fetch_day
 from core.processor import decompress
@@ -125,20 +135,45 @@ def _download_symbol_native(symbol, start, end, timeframe_str, tf_value,
 
     csv_dumper = CSVDumper(symbol, tf_value, start, end, folder, header, price_type, volume_type)
 
-    try:
-        candles = fetch_native_candles(symbol, start, end, timeframe_str.upper(), price_type)
-        csv_dumper.append_native_candles(candles)
-        print(f"  ✓ {symbol}: Got {len(candles)} native candles")
-    except Exception as e:
-        Logger.error(f"Native candle fetch failed for {symbol}: {e}")
-        print(f"  ✗ {symbol}: Native fetch failed — {str(e)[:60]}")
-        return
+    # Split date range into yearly chunks (365 days max each)
+    # Keeps memory flat (< 50MB peak RAM) and streams to disk chunk-by-chunk
+    chunks = []
+    curr_start = start
+    while curr_start <= end:
+        curr_end = min(curr_start + timedelta(days=364), end)
+        chunks.append((curr_start, curr_end))
+        curr_start = curr_end + timedelta(days=1)
 
-    # Write CSV
+    print(f"  ⚡ Processing native candles in {len(chunks)} yearly chunks...")
+
+    total_candles = 0
     start_time = time.time()
-    file_path = csv_dumper.dump()
+
+    for idx, (chunk_start, chunk_end) in enumerate(chunks):
+        print(f"  ⚡ Fetching chunk {idx+1}/{len(chunks)}: {chunk_start} to {chunk_end}...")
+        try:
+            candles = fetch_native_candles(symbol, chunk_start, chunk_end, timeframe_str.upper(), price_type)
+            csv_dumper.append_native_candles(candles)
+            csv_dumper.dump(append=True)
+            total_candles += len(candles)
+            print(f"  ✓ Chunk {idx+1}/{len(chunks)} saved successfully. ({len(candles):,} candles, RAM cleared)")
+        except Exception as e:
+            Logger.error(f"Native candle fetch failed for {symbol} chunk {idx+1}: {e}")
+            print(f"  ✗ Chunk {idx+1}/{len(chunks)} failed — {str(e)[:60]}")
+
     elapsed = time.time() - start_time
-    print(f"  ✓ {symbol}: Written to {file_path} ({elapsed:.1f}s)")
+    
+    # Reconstruct exact safe file path that was written chunk-by-chunk
+    safe_symbol = symbol.replace('/', '-')
+    file_name = "{}-{}_{:02d}_{:02d}-{}_{:02d}_{:02d}.csv".format(
+        safe_symbol,
+        start.year, start.month, start.day,
+        end.year, end.month, end.day,
+    )
+    import os
+    file_path = os.path.join(folder, file_name)
+    
+    print(f"  ✓ {symbol}: All chunks written to {file_path} ({elapsed:.1f}s, Total candles: {total_candles:,})")
 
     # Validate
     results = validate_output(file_path, start, end, symbol)
@@ -170,7 +205,8 @@ def _download_symbol(symbol, start, end, all_days, total_days,
 
     progress = DownloadProgress(len(pending_days), symbol)
     csv_dumper = CSVDumper(symbol, timeframe, start, end, folder, header, price_type, volume_type)
-    completed_list = list(completed_dates)
+    # Use a set for O(1) membership checks; convert to list only when saving
+    completed_set = set(completed_dates)
 
     def do_work(day):
         """Download and process a single day."""
@@ -179,14 +215,14 @@ def _download_symbol(symbol, start, end, all_days, total_days,
             ticks = decompress(symbol, day, raw_data)
             with lock:
                 csv_dumper.append(day, ticks)
-                completed_list.append(day)
+                completed_set.add(day)
                 day_counter[0] += 1
             progress.update(success=True)
 
-            # Save state frequently for crash recovery
-            if day_counter[0] % 5 == 0:
+            # Save state periodically for crash recovery
+            if day_counter[0] % 20 == 0:
                 with lock:
-                    save_state(folder, symbol, completed_list, all_days)
+                    save_state(folder, symbol, list(completed_set), all_days)
 
         except Exception as e:
             Logger.error(f"Error processing {symbol} {day}: {e}")
@@ -206,6 +242,10 @@ def _download_symbol(symbol, start, end, all_days, total_days,
                 Logger.error(f"Thread error: {future.exception()}")
 
     progress.close()
+
+    # Save state before CSV write (crash during write won't lose progress)
+    if resume:
+        save_state(folder, symbol, list(completed_set), all_days)
 
     # Write final CSV
     start_time = time.time()

@@ -7,7 +7,7 @@ native candle mode, and DD.MM.YYYY HH:MM:SS datetime format.
 import csv
 import calendar
 from os.path import join
-from datetime import datetime
+from datetime import datetime, timezone
 
 from core.candle import Candle
 from config.settings import TimeFrame
@@ -27,7 +27,7 @@ def format_float(number):
 
 def stringify_utc(unix_ts):
     """Convert unix timestamp to UTC datetime string in DD.MM.YYYY HH:MM:SS[.mmm] format."""
-    dt = datetime.utcfromtimestamp(unix_ts)
+    dt = datetime.fromtimestamp(unix_ts, tz=timezone.utc)
     return format_datetime(dt)
 
 
@@ -52,7 +52,12 @@ class CSVDumper:
       - Tick output (raw ask/bid/volumes)
       - Tick-to-candle conversion with BID/ASK/MID price selection
       - Native candle data (pre-computed by Dukascopy)
+      - Streaming flush for large date ranges to limit memory usage
     """
+
+    # Flush buffered days to a temp file when this many days are accumulated.
+    # Prevents memory bloat on multi-year downloads.
+    _FLUSH_THRESHOLD = 60
 
     def __init__(self, symbol, timeframe, start, end, folder, header=True,
                  price_type='BID', volume_type='TOTAL'):
@@ -66,6 +71,7 @@ class CSVDumper:
         self.volume_type = volume_type.upper() if volume_type else 'TOTAL'
         self.buffer = {}  # {date: [ticks or candles]}
         self.native_candles = []  # For native candle mode
+        self._flushed_days = []  # List of (day, data) flushed to reduce peak memory
 
     def get_tick_header(self):
         return ['time', 'ask', 'bid', 'ask_volume', 'bid_volume']
@@ -110,13 +116,15 @@ class CSVDumper:
         If timeframe != TICK, aggregate ticks into candles immediately.
         Uses UTC-safe bucketing (calendar.timegm instead of time.mktime).
         """
-        self.buffer[day] = []
+        day_data = []
 
         if not ticks or len(ticks) == 0:
+            self.buffer[day] = day_data
             return
 
         if self.timeframe == TimeFrame.TICK:
             self.buffer[day] = list(ticks)
+            self._maybe_flush()
             return
 
         # Aggregate ticks into candles using UTC timestamps
@@ -141,7 +149,7 @@ class CSVDumper:
                     )
                     if candle.open_price > 0:
                         candle._volume = sum(current_volumes)
-                        self.buffer[day].append(candle)
+                        day_data.append(candle)
                 current_prices = []
                 current_volumes = []
 
@@ -154,7 +162,19 @@ class CSVDumper:
             candle = Candle(self.symbol, previous_key, self.timeframe, current_prices)
             if candle.open_price != 0:
                 candle._volume = sum(current_volumes)
-                self.buffer[day].append(candle)
+                day_data.append(candle)
+
+        self.buffer[day] = day_data
+        self._maybe_flush()
+
+    def _maybe_flush(self):
+        """Flush oldest days from buffer to _flushed_days list when threshold reached."""
+        if len(self.buffer) >= self._FLUSH_THRESHOLD:
+            sorted_days = sorted(self.buffer.keys())
+            # Keep the last 10 days in buffer, flush the rest
+            days_to_flush = sorted_days[:-10]
+            for day in days_to_flush:
+                self._flushed_days.append((day, self.buffer.pop(day)))
 
     def append_native_candles(self, candles):
         """
@@ -163,20 +183,28 @@ class CSVDumper:
         """
         self.native_candles.extend(candles)
 
-    def dump(self):
-        """Write all buffered data to a single CSV file."""
+    def dump(self, append=False):
+        """Write all buffered data to a single CSV file, optionally in append mode."""
+        # Sanitize symbol for safe filename (replace / with -)
+        safe_symbol = self.symbol.replace('/', '-')
         file_name = TEMPLATE_FILE_NAME.format(
-            self.symbol,
+            safe_symbol,
             self.start.year, self.start.month, self.start.day,
             self.end.year, self.end.month, self.end.day,
         )
 
         file_path = join(self.folder, file_name)
 
-        with open(file_path, 'w', newline='') as csv_file:
+        import os
+        # Determine if we should open in append mode and if we need to write the header
+        file_exists = os.path.exists(file_path) and os.path.getsize(file_path) > 0
+        mode = 'a' if (append and file_exists) else 'w'
+        write_header = self.include_header and not (append and file_exists)
+
+        with open(file_path, mode, newline='', encoding='utf-8') as csv_file:
             writer = csv.DictWriter(csv_file, fieldnames=self.get_header())
 
-            if self.include_header:
+            if write_header:
                 writer.writeheader()
 
             # If we have native candles, write them directly
@@ -201,10 +229,16 @@ class CSVDumper:
                         'volume': round(c[5], 2),
                     })
             else:
-                # Write tick or tick-derived candle data
-                prev_candle_ohlcv = None
+                # Merge flushed days and remaining buffer, write in order
+                all_day_data = list(self._flushed_days)
                 for day in sorted(self.buffer.keys()):
-                    for value in self.buffer[day]:
+                    all_day_data.append((day, self.buffer[day]))
+                # Sort by day to ensure chronological output
+                all_day_data.sort(key=lambda x: x[0])
+
+                prev_candle_ohlcv = None
+                for day, values in all_day_data:
+                    for value in values:
                         if self.timeframe == TimeFrame.TICK:
                             writer.writerow({
                                 'time': format_datetime(value[0]),
@@ -232,5 +266,9 @@ class CSVDumper:
                                 'volume': getattr(value, '_volume', 0),
                             })
 
-        return file_path
+        # Free memory after writing
+        self.buffer.clear()
+        self._flushed_days.clear()
+        self.native_candles.clear()
 
+        return file_path

@@ -973,7 +973,7 @@
                         <div class="symbol-grid" id="symbolGrid"></div>
                         <div class="custom-symbol-row">
                             <input type="text" class="form-input" id="customSymbolInput"
-                                placeholder="Type custom symbol(s), e.g. BTCUSD, ETHUSD"
+                                placeholder="Type custom symbol(s), e.g. BTCUSD, DEU.IDX/EUR"
                                 onkeydown="if(event.key==='Enter'){event.preventDefault();addCustomSymbols()}">
                             <button class="btn btn-secondary btn-sm" onclick="addCustomSymbols()"
                                 style="white-space:nowrap;">+ Add</button>
@@ -1234,10 +1234,10 @@
             if (!raw) return;
 
             // Split by comma, space, or semicolon
-            const symbols = raw.split(/[,;\s]+/).filter(s => s.length >= 3 && /^[A-Z0-9.]+$/.test(s));
+            const symbols = raw.split(/[,;\s]+/).filter(s => s.length >= 3 && /^[A-Z0-9.\/\-_]+$/.test(s));
 
             if (symbols.length === 0) {
-                showToast('Enter valid symbol(s) like BTCUSD, ETHUSD', 'error');
+                showToast('Enter valid symbol(s) like BTCUSD, ETHUSD or DEU.IDX/EUR', 'error');
                 return;
             }
 

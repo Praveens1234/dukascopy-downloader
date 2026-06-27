@@ -3,7 +3,7 @@ Candle (OHLC) class for aggregating tick data into candlesticks.
 Matches duka repo's candle.py pattern.
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 
 class Candle:
@@ -32,7 +32,7 @@ class Candle:
             self.low = 0
 
     def __str__(self):
-        dt = datetime.utcfromtimestamp(self.timestamp)
+        dt = datetime.fromtimestamp(self.timestamp, tz=timezone.utc)
         return (
             f"{dt} [{self.timestamp}] -- {self.symbol} -- "
             f"{{ H:{self.high} L:{self.low} O:{self.open_price} C:{self.close_price} }}"

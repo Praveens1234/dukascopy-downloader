@@ -10,6 +10,7 @@ Binary format: 24 bytes/candle as !IIIIIf
 import asyncio
 import random
 import struct
+import threading
 from datetime import datetime, date, timedelta
 from calendar import monthrange
 from lzma import LZMADecompressor, LZMAError, FORMAT_AUTO
@@ -20,14 +21,38 @@ from config.settings import (
     CANDLE_URL_TEMPLATES, HTTP_HEADERS, HTTP_TIMEOUT,
     SPECIAL_POINT_SYMBOLS, DEFAULT_POINT_VALUE,
     DOWNLOAD_ATTEMPTS, RETRY_BASE_DELAY, RETRY_MAX_DELAY,
-    REQUEST_DELAY, HOURLY_CONCURRENCY,
+    REQUEST_DELAY, HOURLY_CONCURRENCY, get_point_value,
+    normalize_symbol_for_url,
 )
+import sys
+import socket
+
+# Monkeypatch socket.getaddrinfo to force IPv4
+# Prevents connection hangs on machines with broken IPv6 configurations/routing.
+orig_getaddrinfo = socket.getaddrinfo
+def getaddrinfo_ipv4(*args, **kwargs):
+    responses = orig_getaddrinfo(*args, **kwargs)
+    ipv4_res = [r for r in responses if r[0] == socket.AF_INET]
+    return ipv4_res if ipv4_res else responses
+socket.getaddrinfo = getaddrinfo_ipv4
+
+# Set Windows Selector event loop policy to avoid Proactor DNS resolution hangs
+if sys.platform == 'win32':
+    try:
+        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+    except AttributeError:
+        pass
+
 from utils.logger import get_logger
 
 Logger = get_logger()
 
 CANDLE_STRUCT = struct.Struct('!IIIIIf')  # 24 bytes
 CANDLE_SIZE = CANDLE_STRUCT.size  # 24
+
+# Maximum URLs to fetch concurrently in a single batch to avoid
+# overwhelming the connection pool on multi-year requests.
+_BATCH_SIZE = 90
 
 
 def decompress_lzma(data):
@@ -74,7 +99,7 @@ def parse_candles(raw_data, base_time, symbol):
     Returns:
         List of (datetime, open, high, low, close, volume) tuples (real candles only).
     """
-    point = SPECIAL_POINT_SYMBOLS.get(symbol.lower(), DEFAULT_POINT_VALUE)
+    point = get_point_value(symbol)
     candles = []
     count = len(raw_data) // CANDLE_SIZE
     prev_ohlcv = None
@@ -118,12 +143,12 @@ async def _download_candle_file(session, url, semaphore):
     """Download a single candle .bi5 file with retries."""
     last_error = None
     async with semaphore:
-        for attempt in range(DOWNLOAD_ATTEMPTS):
+        for attempt in range(5):  # 5 attempts for native candles to avoid long hangs
             try:
                 async with session.get(
                     url,
                     headers=HTTP_HEADERS,
-                    timeout=aiohttp.ClientTimeout(total=HTTP_TIMEOUT),
+                    timeout=aiohttp.ClientTimeout(total=15),  # 15s timeout is plenty for tiny native candle files
                 ) as resp:
                     if resp.status == 200:
                         data = await resp.read()
@@ -132,19 +157,19 @@ async def _download_candle_file(session, url, semaphore):
                         return b""  # No data for this period
                     elif resp.status == 503:
                         delay = min(
-                            RETRY_BASE_DELAY * (2 ** attempt) + random.uniform(0.5, 2.0),
-                            RETRY_MAX_DELAY
+                            1.0 * (2 ** attempt) + random.uniform(0.5, 2.0),
+                            15.0
                         )
                         last_error = f"HTTP 503 (rate limited)"
                         await asyncio.sleep(delay)
                     else:
                         last_error = f"HTTP {resp.status}"
-                        await asyncio.sleep(RETRY_BASE_DELAY)
+                        await asyncio.sleep(1.0)
             except (aiohttp.ClientError, asyncio.TimeoutError) as e:
                 last_error = str(e)
-                await asyncio.sleep(RETRY_BASE_DELAY * (attempt + 1))
+                await asyncio.sleep(1.0 * (attempt + 1))
 
-    Logger.warning(f"Failed to download candle file after {DOWNLOAD_ATTEMPTS} retries: {last_error}")
+    Logger.warning(f"Failed to download candle file after 5 retries: {last_error}")
     return b""
 
 
@@ -157,7 +182,7 @@ def _build_m1_urls(symbol, start_date, end_date, price_type):
     while current <= end_date:
         if current.weekday() != 5 and current != today:  # Skip Saturdays
             url = template.format(
-                currency=symbol,
+                currency=normalize_symbol_for_url(symbol),
                 year=current.year,
                 month=current.month - 1,  # 0-indexed months
                 day=current.day,
@@ -176,7 +201,7 @@ def _build_h1_urls(symbol, start_date, end_date, price_type):
     end_month = date(end_date.year, end_date.month, 1)
     while current <= end_month:
         url = template.format(
-            currency=symbol,
+            currency=normalize_symbol_for_url(symbol),
             year=current.year,
             month=current.month - 1,  # 0-indexed months
             price_type=price_type,
@@ -196,7 +221,7 @@ def _build_d1_urls(symbol, start_date, end_date, price_type):
     urls = []
     for year in range(start_date.year, end_date.year + 1):
         url = template.format(
-            currency=symbol,
+            currency=normalize_symbol_for_url(symbol),
             year=year,
             price_type=price_type,
         )
@@ -204,7 +229,46 @@ def _build_d1_urls(symbol, start_date, end_date, price_type):
     return urls
 
 
-async def fetch_native_candles_async(symbol, start_date, end_date, timeframe_str, price_type='BID'):
+async def _fetch_batch(session, batch, semaphore, timeframe_str, symbol):
+    """Fetch and parse a batch of candle URLs. Returns list of candle tuples."""
+    tasks = []
+    for base_date, url in batch:
+        tasks.append((base_date, url, _download_candle_file(session, url, semaphore)))
+
+    results = await asyncio.gather(*[t[2] for t in tasks], return_exceptions=True)
+    batch_candles = []
+
+    for (base_date, url, _), compressed_data in zip(tasks, results):
+        if isinstance(compressed_data, Exception):
+            Logger.error(f"Error fetching {url}: {compressed_data}")
+            continue
+        if not compressed_data or len(compressed_data) == 0:
+            continue
+
+        try:
+            raw = decompress_lzma(compressed_data)
+            if len(raw) == 0:
+                continue
+
+            # Base time depends on the timeframe level
+            if timeframe_str == 'M1':
+                base_time = datetime(base_date.year, base_date.month, base_date.day, 0, 0, 0)
+            elif timeframe_str == 'H1':
+                base_time = datetime(base_date.year, base_date.month, 1, 0, 0, 0)
+            elif timeframe_str == 'D1':
+                base_time = datetime(base_date.year, 1, 1, 0, 0, 0)
+            else:
+                base_time = datetime(base_date.year, base_date.month, base_date.day, 0, 0, 0)
+
+            candles = parse_candles(raw, base_time, symbol)
+            batch_candles.extend(candles)
+        except Exception as e:
+            Logger.error(f"Error parsing candle data from {url}: {e}")
+
+    return batch_candles
+
+
+async def fetch_native_candles_async(symbol, start_date, end_date, timeframe_str, price_type='BID', progress_cb=None):
     """
     Fetch native candle data from Dukascopy.
 
@@ -214,6 +278,7 @@ async def fetch_native_candles_async(symbol, start_date, end_date, timeframe_str
         end_date: date object
         timeframe_str: 'M1', 'H1', or 'D1'
         price_type: 'BID' or 'ASK'
+        progress_cb: optional progress callback receiving completed day count
 
     Returns:
         List of (datetime, open, high, low, close, volume) tuples, filtered to date range.
@@ -228,49 +293,37 @@ async def fetch_native_candles_async(symbol, start_date, end_date, timeframe_str
         raise ValueError(f"Native candles not available for timeframe: {timeframe_str}")
 
     all_candles = []
-    semaphore = asyncio.Semaphore(HOURLY_CONCURRENCY)
+    # Use higher concurrency for pre-computed daily candle files to speed up download dramatically
+    CANDLE_CONCURRENCY = 24
+    semaphore = asyncio.Semaphore(CANDLE_CONCURRENCY)
 
+    from aiohttp.resolver import ThreadedResolver
     connector = aiohttp.TCPConnector(
-        limit=HOURLY_CONCURRENCY,
-        limit_per_host=HOURLY_CONCURRENCY,
+        limit=CANDLE_CONCURRENCY,
+        limit_per_host=CANDLE_CONCURRENCY,
         force_close=False,
         enable_cleanup_closed=True,
+        resolver=ThreadedResolver(),
     )
 
     async with aiohttp.ClientSession(connector=connector) as session:
-        tasks = []
-        for base_date, url in url_pairs:
-            tasks.append((base_date, url, _download_candle_file(session, url, semaphore)))
-            if REQUEST_DELAY > 0:
-                await asyncio.sleep(REQUEST_DELAY)
-
-        # Gather results
-        results = await asyncio.gather(*[t[2] for t in tasks], return_exceptions=True)
-
-        for (base_date, url, _), compressed_data in zip(tasks, results):
-            if isinstance(compressed_data, Exception):
-                Logger.error(f"Error fetching {url}: {compressed_data}")
-                continue
-            if not compressed_data or len(compressed_data) == 0:
-                continue
-
-            try:
-                raw = decompress_lzma(compressed_data)
-                if len(raw) == 0:
-                    continue
-
-                # Base time depends on the timeframe level
-                if timeframe_str == 'M1':
-                    base_time = datetime(base_date.year, base_date.month, base_date.day, 0, 0, 0)
-                elif timeframe_str == 'H1':
-                    base_time = datetime(base_date.year, base_date.month, 1, 0, 0, 0)
-                elif timeframe_str == 'D1':
-                    base_time = datetime(base_date.year, 1, 1, 0, 0, 0)
-
-                candles = parse_candles(raw, base_time, symbol)
-                all_candles.extend(candles)
-            except Exception as e:
-                Logger.error(f"Error parsing candle data from {url}: {e}")
+        # Process in batches to avoid overwhelming connections on multi-year ranges
+        for batch_start in range(0, len(url_pairs), _BATCH_SIZE):
+            batch = url_pairs[batch_start:batch_start + _BATCH_SIZE]
+            batch_candles = await _fetch_batch(session, batch, semaphore, timeframe_str, symbol)
+            all_candles.extend(batch_candles)
+            if progress_cb:
+                try:
+                    # Report progress back for the completed batch days
+                    if timeframe_str == 'M1':
+                        progress_cb(len(batch))
+                    elif timeframe_str == 'H1':
+                        # Convert month counts to days roughly
+                        progress_cb(len(batch) * 30)
+                    else:
+                        progress_cb(len(batch) * 365)
+                except Exception:
+                    pass
 
     # Filter to requested date range and sort
     start_dt = datetime(start_date.year, start_date.month, start_date.day)
@@ -281,6 +334,31 @@ async def fetch_native_candles_async(symbol, start_date, end_date, timeframe_str
     return all_candles
 
 
-def fetch_native_candles(symbol, start_date, end_date, timeframe_str, price_type='BID'):
-    """Synchronous wrapper for native candle fetching."""
-    return asyncio.run(fetch_native_candles_async(symbol, start_date, end_date, timeframe_str, price_type))
+def fetch_native_candles(symbol, start_date, end_date, timeframe_str, price_type='BID', progress_cb=None):
+    """Synchronous wrapper for native candle fetching.
+
+    Safe to call from both standalone scripts and from within a running
+    asyncio event loop (e.g. FastAPI/uvicorn).
+    """
+    try:
+        # Check if there's already a running event loop (e.g. inside FastAPI)
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+
+    if loop is not None and loop.is_running():
+        # We're inside an existing event loop (server mode).
+        # Run in a separate thread with its own loop to avoid
+        # "asyncio.run() cannot be called from a running event loop".
+        import concurrent.futures
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(
+                asyncio.run,
+                fetch_native_candles_async(symbol, start_date, end_date, timeframe_str, price_type, progress_cb)
+            )
+            return future.result()
+    else:
+        # No running loop — safe to use asyncio.run()
+        return asyncio.run(
+            fetch_native_candles_async(symbol, start_date, end_date, timeframe_str, price_type, progress_cb)
+        )

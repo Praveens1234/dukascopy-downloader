@@ -8,7 +8,10 @@ import struct
 from datetime import datetime, timedelta
 from lzma import LZMADecompressor, LZMAError, FORMAT_AUTO
 
-from config.settings import SPECIAL_POINT_SYMBOLS, DEFAULT_POINT_VALUE, VOLUME_MULTIPLIER
+from config.settings import DEFAULT_POINT_VALUE, VOLUME_MULTIPLIER, get_point_value
+from utils.logger import get_logger
+
+Logger = get_logger()
 
 
 def decompress_lzma(data):
@@ -64,7 +67,7 @@ def normalize_hour(symbol, day, hour, ticks):
     (datetime, ask, bid, ask_volume, bid_volume) tuples.
     time_ms is offset from start of the HOUR, not the day.
     """
-    point = SPECIAL_POINT_SYMBOLS.get(symbol.lower(), DEFAULT_POINT_VALUE)
+    point = get_point_value(symbol)
     hour_start = datetime(day.year, day.month, day.day, hour, 0, 0)
 
     def norm(time_ms, ask_raw, bid_raw, ask_vol, bid_vol):
@@ -136,9 +139,15 @@ def decompress(symbol, day, hourly_data_list):
             tokens = tokenize(raw)
             ticks = normalize_hour(symbol, day, hour, tokens)
             all_ticks.extend(ticks)
-        except Exception:
-            # Skip corrupted hourly files silently
-            pass
+        except LZMAError as e:
+            # Corrupted LZMA data for this hour — log and skip
+            Logger.warning(f"LZMA decompression failed for {symbol} {day} hour {hour}: {e}")
+        except struct.error as e:
+            # Malformed binary data — log and skip
+            Logger.warning(f"Binary parse error for {symbol} {day} hour {hour}: {e}")
+        except Exception as e:
+            # Unexpected error — log with full details instead of swallowing silently
+            Logger.error(f"Unexpected error processing {symbol} {day} hour {hour}: {type(e).__name__}: {e}")
 
     # Sort by timestamp to ensure chronological order
     all_ticks.sort(key=lambda t: t[0])
